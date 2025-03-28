@@ -1,0 +1,174 @@
+#!/bin/bash
+#
+# clip - Utility for clipboard operations in Linux
+# 
+# This script allows copying file contents to clipboard and
+# pasting clipboard contents to files or stdout.
+#
+# Author: Okusi Systems
+# Version: 0.8.1
+#
+set -euo pipefail
+
+# Initialize globals
+declare PRG0 PRG
+declare VERSION='0.8.1'
+declare -i VERBOSE=1
+# Get the script path and name
+PRG0=$(readlink -fn -- "$0")
+PRG=$(basename "$PRG0")
+# Will hold path to xclip binary
+declare -- CLIP
+
+vinfo() { ((VERBOSE)) && >&2 echo "$PRG: $*" || true; }
+verror() { >&2 echo "$PRG: $*"; }
+
+# Display help information
+usage() {
+  cat <<EOT
+$PRG $VERSION - Terminal clipboard utility
+
+Copies contents of files to clipboard;
+Pastes contents of clipboard to file.
+
+Usage:
+    # Copy mode
+    $PRG filename [filename ...]
+  or:
+    # Paste mode
+    $PRG -p [filename]
+
+Requires: xclip
+
+Options:
+  -p, --paste     Paste clipboard contents to file or stdout
+  -v, --verbose   Enable verbose output (default)
+  -q, --quiet     Disable verbose output
+  -V, --version   Display version
+  -h, --help      Display this help message
+
+Examples:
+  $PRG myfile.txt
+  $PRG /tmp/myfile.md $HOME/myotherfile.md
+
+  $PRG -p
+  $PRG -p newfile.txt
+
+EOT
+  exit "${1:-1}"
+}
+
+# Copy content of one or more files to the clipboard
+# 
+# Arguments:
+#   $@ - List of files to copy
+# 
+# Returns:
+#   0 on success, 1 if no valid files were found
+copy_contents_of_files_to_clipboard() {
+  local -a Files=()
+  local -- file
+  # Process each file argument
+  for file in "$@"; do
+    if [[ ! -f "$file" ]]; then
+      verror "File '$file' not found"
+      continue
+    fi
+    Files+=("$file")
+  done
+  # Check if we have any valid files
+  if ((${#Files[@]} == 0)); then
+    verror "No files to copy to clipboard"
+    return 1
+  fi
+  # Copy concatenated file contents to clipboard
+  "$CLIP" -selection clipboard < <(cat -s "${Files[@]}")
+  # Show success message if verbose mode enabled
+  vinfo "File$( ((${#Files[@]} == 1)) || echo 's' ) '${Files[*]}' copied to clipboard"
+}
+
+# Paste clipboard contents to stdout or a file
+#
+# Arguments:
+#   $1 - (Optional) Output file path. If not provided, outputs to stdout
+#
+# Returns:
+#   0 on success, exits with code 1 if destination directory doesn't exist
+paste_contents_of_clipboard_to_file(){
+  # Paste to stdout?
+  if (($# == 0)); then
+    "$CLIP" -selection clipboard -o
+    return $?
+  fi
+
+  # Paste to file
+  (($# > 1)) && {
+    vinfo "Can only paste to one file: ${@:2} ignored"
+  }
+  local -- output_file="$1" dir_name
+  dir_name=$(dirname "$output_file")
+  if [[ ! -d "$dir_name" ]]; then
+    vinfo "Directory '$dir_name' does not exist. Creating ..."
+    mkdir -p "$dir_name" || {
+      verror "Could not create '$dir_name"
+      return 1
+    }
+  fi
+  if ((VERBOSE)) && [[ -f "$output_file" ]]; then
+    if [ -t 1 ]; then
+      verror "'$output_file' already exists."
+      local -- yn=n
+      read -r -p "$PRG: Overwrite? y/n " yn
+      [[ $yn == y ]] || { verror "Operation aborted"; return 1; }
+    fi
+  fi
+  if ! touch "$output_file"; then
+    verror "Could not create '$output_file'"
+    return 1
+  fi
+  # Write to file
+  "$CLIP" -selection clipboard -o > "$output_file"
+  # Show success message if verbose mode enabled
+  vinfo "Clipboard contents pasted to '$output_file'"
+}
+
+# Main function that handles argument parsing and operation mode selection
+#
+# Arguments:
+#   $@ - Command line arguments
+main() {
+  local -a Files=()
+  local -i pastemode=0
+
+  # Process command-line arguments
+  while (($#)); do case $1 in
+    -p|--paste)    pastemode=1 ;;
+    -v|--verbose)  VERBOSE=1 ;;
+    -q|--quiet)    VERBOSE=0 ;;
+    -V|--version)  echo "$PRG vs ${VERSION}"; exit 0 ;;
+    -h|--help)     usage 0 ;;
+    --)            shift; Files+=( "$@" ); break ;;
+    -[pvqVh]*) #shellcheck disable=SC2046 # expand aggregated short options
+                   set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
+    -*)            verror "Bad argument '$1'"; exit 22 ;;
+    *)             Files+=( "$1" ) ;;
+  esac; shift; done
+
+  # Check if xclip is installed, install if missing
+  CLIP=$(command -v xclip || true)
+  if [[ -z $CLIP ]]; then
+    vinfo "Installing package 'xclip'"
+    sudo apt install -y xclip &>/dev/null
+    CLIP=$(command -v xclip)
+  fi
+
+  # Run in appropriate mode
+  if ((pastemode)); then
+    paste_contents_of_clipboard_to_file "${Files[@]}"
+  else
+    copy_contents_of_files_to_clipboard "${Files[@]}"
+  fi
+}
+
+main "$@"
+#fin
