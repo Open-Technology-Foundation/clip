@@ -6,21 +6,27 @@
 # pasting clipboard contents to files or stdout.
 #
 # Author: Okusi Systems
-# Version: 0.8.1
+# Version: 0.8.3
 #
 set -euo pipefail
 
 # Initialize globals
 declare PRG0 PRG
-declare VERSION='0.8.1'
+declare VERSION='0.8.3'
 declare -i VERBOSE=1
+declare -i COMPRESS=0
+declare -i QUALITY=90
+declare -- COMPRESS_MODE="optimize"  # 'optimize' or 'resize'
 # Get the script path and name
 PRG0=$(readlink -fn -- "$0")
 PRG=$(basename "$PRG0")
-# Will hold path to xclip binary
+# Will hold path to executables
 declare -- CLIP
+declare -- CONVERT
+declare -- OPTIPNG
+declare -- PNGQUANT
 
-vinfo() { ((VERBOSE)) && >&2 echo "$PRG: $*" || true; }
+vinfo() { if ((VERBOSE)); then >&2 echo "$PRG: $*"; else true; fi; }
 verror() { >&2 echo "$PRG: $*"; }
 
 # Display help information
@@ -29,7 +35,7 @@ usage() {
 $PRG $VERSION - Terminal clipboard utility
 
 Copies contents of files to clipboard;
-Pastes contents of clipboard to file.
+Pastes contents of clipboard to file (supports both text and images).
 
 Usage:
     # Copy mode
@@ -38,10 +44,13 @@ Usage:
     # Paste mode
     $PRG -p [filename]
 
-Requires: xclip
+Requires: xclip (and optionally PNG optimizers for compression)
 
 Options:
   -p, --paste     Paste clipboard contents to file or stdout
+  -c, --compress  Optimize PNG image when pasting (requires optipng/pngquant)
+  -r, --resize    Use resize-based compression instead of optimization
+  -Q, --quality N Set compression quality/level (1-100, default: 90)
   -v, --verbose   Enable verbose output (default)
   -q, --quiet     Disable verbose output
   -V, --version   Display version
@@ -53,6 +62,9 @@ Examples:
 
   $PRG -p
   $PRG -p newfile.txt
+  $PRG -p screenshot.png         # Works with image data
+  $PRG -p -c screenshot.png      # Optimize the PNG image (smaller file size)
+  $PRG -p -r -Q 75 image.png     # Compress with resize-based method at 75% quality
 
 EOT
   exit "${1:-1}"
@@ -103,9 +115,9 @@ paste_contents_of_clipboard_to_file(){
 
   # Paste to file
   (($# > 1)) && {
-    vinfo "Can only paste to one file: ${@:2} ignored"
+    vinfo "Can only paste to one file: ${*:2} ignored"
   }
-  local -- output_file="$1" dir_name
+  local -- output_file="$1" dir_name temp_file temp_file2 file_size1 file_size2
   dir_name=$(dirname "$output_file")
   if [[ ! -d "$dir_name" ]]; then
     vinfo "Directory '$dir_name' does not exist. Creating ..."
@@ -126,8 +138,79 @@ paste_contents_of_clipboard_to_file(){
     verror "Could not create '$output_file'"
     return 1
   fi
-  # Write to file
-  "$CLIP" -selection clipboard -o > "$output_file"
+  
+  # Check if clipboard contains image data
+  if "$CLIP" -selection clipboard -t TARGETS -o | grep -q "image/png"; then
+    vinfo "Detected image data in clipboard"
+    
+    if ((COMPRESS)); then
+      # Create temporary files
+      temp_file=$(mktemp)
+      temp_file2=$(mktemp)
+      
+      # First save the raw PNG
+      "$CLIP" -selection clipboard -t image/png -o > "$temp_file"
+      file_size1=$(stat -c%s "$temp_file")
+      vinfo "Original image size: $file_size1 bytes"
+      
+      if [[ $COMPRESS_MODE == "optimize" ]]; then
+        vinfo "Using PNG optimization"
+        
+        # Try pngquant first for best compression
+        if [[ -n "$PNGQUANT" ]]; then
+          vinfo "Optimizing with pngquant (quality: $QUALITY)"
+          "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file"
+        elif [[ -n "$OPTIPNG" ]]; then
+          # Calculate optipng level (0-7) from quality (0-100)
+          local optilevel=$(( 7 - QUALITY / 15 ))
+          [[ $optilevel -lt 0 ]] && optilevel=0
+          [[ $optilevel -gt 7 ]] && optilevel=7
+          
+          vinfo "Optimizing with optipng (level: $optilevel)"
+          "$OPTIPNG" -o"$optilevel" -quiet -out "$temp_file2" "$temp_file"
+        elif [[ -n "$CONVERT" ]]; then
+          # Fallback to ImageMagick with options that actually reduce size
+          vinfo "Optimizing with ImageMagick"
+          "$CONVERT" "$temp_file" -strip -define png:compression-filter=5 -define png:compression-level=9 -define png:compression-strategy=1 "$temp_file2"
+        else
+          verror "No PNG optimization tools available"
+          cp "$temp_file" "$temp_file2"
+        fi
+      else
+        # Resize-based compression
+        if [[ -n "$CONVERT" ]]; then
+          # Convert quality (1-100) to resize percentage (1-100)
+          vinfo "Resizing image with quality: $QUALITY%"
+          "$CONVERT" "$temp_file" -resize "$QUALITY%" "$temp_file2"
+        else
+          verror "ImageMagick not available for resize compression"
+          cp "$temp_file" "$temp_file2"
+        fi
+      fi
+      
+      # Check if the compressed file is actually smaller
+      file_size2=$(stat -c%s "$temp_file2")
+      vinfo "Compressed image size: $file_size2 bytes"
+      
+      if [[ $file_size2 -lt $file_size1 ]]; then
+        vinfo "Compression successful, saved $(( file_size1 - file_size2 )) bytes"
+        cp "$temp_file2" "$output_file"
+      else
+        vinfo "Compression did not reduce file size, using original"
+        cp "$temp_file" "$output_file"
+      fi
+      
+      # Remove temporary files
+      rm -f "$temp_file" "$temp_file2"
+    else
+      # Write image directly to file without compression
+      "$CLIP" -selection clipboard -t image/png -o > "$output_file"
+    fi
+  else
+    # Write text to file
+    "$CLIP" -selection clipboard -o > "$output_file"
+  fi
+  
   # Show success message if verbose mode enabled
   vinfo "Clipboard contents pasted to '$output_file'"
 }
@@ -143,12 +226,15 @@ main() {
   # Process command-line arguments
   while (($#)); do case $1 in
     -p|--paste)    pastemode=1 ;;
+    -c|--compress) COMPRESS=1 ;;
+    -r|--resize)   COMPRESS=1; COMPRESS_MODE="resize" ;;
+    -Q|--quality)  shift; QUALITY=$1 ;;
     -v|--verbose)  VERBOSE=1 ;;
     -q|--quiet)    VERBOSE=0 ;;
     -V|--version)  echo "$PRG vs ${VERSION}"; exit 0 ;;
     -h|--help)     usage 0 ;;
     --)            shift; Files+=( "$@" ); break ;;
-    -[pvqVh]*) #shellcheck disable=SC2046 # expand aggregated short options
+    -[pcrQvqVh]*) #shellcheck disable=SC2046 # expand aggregated short options
                    set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
     -*)            verror "Bad argument '$1'"; exit 22 ;;
     *)             Files+=( "$1" ) ;;
@@ -160,6 +246,26 @@ main() {
     vinfo "Installing package 'xclip'"
     sudo apt install -y xclip &>/dev/null
     CLIP=$(command -v xclip)
+  fi
+  
+  if ((COMPRESS)); then
+    # Check for PNG optimization tools
+    PNGQUANT=$(command -v pngquant || true)
+    OPTIPNG=$(command -v optipng || true)
+    CONVERT=$(command -v convert || true)
+    
+    if [[ $COMPRESS_MODE == "optimize" ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; then
+      vinfo "Installing PNG optimization tools"
+      sudo apt install -y pngquant optipng &>/dev/null
+      PNGQUANT=$(command -v pngquant || true)
+      OPTIPNG=$(command -v optipng || true)
+    fi
+    
+    if [[ -z $CONVERT ]] && { [[ $COMPRESS_MODE == "resize" ]] || { [[ $COMPRESS_MODE == "optimize" ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; }; }; then
+      vinfo "Installing ImageMagick for image processing"
+      sudo apt install -y imagemagick &>/dev/null
+      CONVERT=$(command -v convert)
+    fi
   fi
 
   # Run in appropriate mode
