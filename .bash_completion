@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Bash completion for clip utility
+_clip() {
+  local cur prev words cword
+  _init_completion || return
+
+  case "$prev" in
+    -Q|--quality)
+      # Quality values 1-100
+      COMPREPLY=($(compgen -W "$(seq 1 100)" -- "$cur"))
+      return
+      ;;
+    -H|--file-header)
+      # File header format
+      COMPREPLY=($(compgen -W "'{}'"))
+      return
+      ;;
+    -F|--file-footer)
+      # File footer format  
+      COMPREPLY=($(compgen -W "'{}'"))
+      return
+      ;;
+  esac
+
+  case "$cur" in
+    -*)
+      # Complete options
+      local opts="-p --paste -c --compress -r --resize -Q --quality -f --use-file-header -H --file-header -F --file-footer -v --verbose -q --quiet -V --version -h --help"
+      COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+      return
+      ;;
+    *)
+      # Check if we're in paste mode
+      local paste_mode=0
+      local i
+      for (( i=1; i < cword; i++ )); do
+        if [[ "${words[i]}" == "-p" || "${words[i]}" == "--paste" ]]; then
+          paste_mode=1
+          break
+        fi
+      done
+
+      if [[ $paste_mode -eq 1 ]]; then
+        # In paste mode, complete with directories and files for output
+        _filedir
+      else
+        # In copy mode, complete with existing files only
+        _filedir
+      fi
+      ;;
+  esac
+}
+
+complete -F _clip clip
