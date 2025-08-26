@@ -1,25 +1,24 @@
 #!/bin/bash
 #
-# clip - Utility for clipboard operations in Linux
+# clip - Utility for clipboard operations in Ubuntu/Linux desktop systems
 # 
 # This script allows copying file contents to clipboard and
 # pasting clipboard contents to files or stdout.
 #
-# Author: Okusi Systems
-# Version: 0.8.3
+# Version: 0.8.4
 #
 set -euo pipefail
 
 # Initialize globals
 declare PRG0 PRG
-declare VERSION='0.8.3'
+declare VERSION='0.8.4'
 declare -i VERBOSE=1
 declare -i COMPRESS=0
 declare -i QUALITY=90
 declare -- COMPRESS_MODE=optimize  # 'optimize' or 'resize'
 # Get the script path and name
-PRG0=$(readlink -fn -- "$0")
-PRG=$(basename "$PRG0")
+PRG0=$(readlink -en -- "$0")
+PRG=$(basename -- "$PRG0")
 # Will hold path to executables
 declare -- CLIP
 declare -- CONVERT
@@ -32,7 +31,6 @@ declare -- FILE_HEADER='```text {}\n'
 declare -- FILE_FOOTER='\n```\n\n'
 
 decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
-#decp() { declare -p "$@" | sed 's/^declare //'; }
 
 vinfo() { ((VERBOSE)) || return 0; echo "$PRG: $*"; }
 verror() { >&2 echo "$PRG: $*"; }
@@ -114,7 +112,7 @@ main() {
     -Q|--quality)  shift; QUALITY=$1 ;;
     -v|--verbose)  VERBOSE=1 ;;
     -q|--quiet)    VERBOSE=0 ;;
-    -V|--version)  echo "$PRG vs ${VERSION}"; exit 0 ;;
+    -V|--version)  echo "$PRG ${VERSION}"; exit 0 ;;
     -h|--help)     usage 0 ;;
     -[fHFpcrQvqVh]*) #shellcheck disable=SC2046 # expand aggregated short options
                    set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
@@ -126,6 +124,8 @@ main() {
   # Check if xclip is installed, install if missing
   CLIP=$(command -v xclip || true)
   if [[ -z $CLIP ]]; then
+    read -rn1 -p "$PRG: Install xclip? y/n "
+    [[ $REPLY == y ]] || exit
     vinfo "Installing package 'xclip'"
     sudo apt install -y xclip &>/dev/null
     CLIP=$(command -v xclip)
@@ -138,6 +138,8 @@ main() {
     CONVERT=$(command -v convert || true)
 
     if [[ $COMPRESS_MODE == "optimize" ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; then
+      read -rn1 -p "$PRG: Install pngquant and optipng? y/n "
+      [[ $REPLY == y ]] || exit
       vinfo "Installing PNG optimization tools"
       sudo apt install -y pngquant optipng &>/dev/null
       PNGQUANT=$(command -v pngquant || true)
@@ -145,6 +147,8 @@ main() {
     fi
 
     if [[ -z $CONVERT ]] && { [[ $COMPRESS_MODE == "resize" ]] || { [[ $COMPRESS_MODE == "optimize" ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; }; }; then
+      read -rn1 -p "$PRG: Install imagemagick? y/n "
+      [[ $REPLY == y ]] || exit
       vinfo "Installing ImageMagick for image processing"
       sudo apt install -y imagemagick &>/dev/null
       CONVERT=$(command -v convert)
@@ -237,9 +241,8 @@ paste_contents_of_clipboard_to_file(){
   if ((VERBOSE)) && [[ -f "$output_file" ]]; then
     if [ -t 1 ]; then
       verror "'$output_file' already exists."
-      local -- yn=n
-      read -r -p "$PRG: Overwrite? y/n " yn
-      [[ $yn == y ]] || { verror "Operation aborted"; return 1; }
+      read -rn1 -p "$PRG: Overwrite? y/n "
+      [[ $REPLY == y ]] || { verror "Operation aborted"; return 1; }
     fi
   fi
   if ! touch "$output_file"; then
