@@ -1,39 +1,61 @@
-#!/bin/bash
-#
+#!/usr/bin/env bash
 # clip - Utility for clipboard operations in Ubuntu/Linux desktop systems
-# 
+#
 # This script allows copying file contents to clipboard and
 # pasting clipboard contents to files or stdout.
 #
-# Version: 0.8.4
-#
 set -euo pipefail
 
-# Initialize globals
-declare PRG0 PRG
-declare VERSION='0.8.4'
-declare -i VERBOSE=1
-declare -i COMPRESS=0
-declare -i QUALITY=90
-declare -- COMPRESS_MODE=optimize  # 'optimize' or 'resize'
-# Get the script path and name
-PRG0=$(readlink -en -- "$0")
-PRG=$(basename -- "$PRG0")
-# Will hold path to executables
-declare -- CLIP
-declare -- CONVERT
-declare -- OPTIPNG
-declare -- PNGQUANT
+# Script metadata
+VERSION='1.0.0'
+PRG0=$(readlink -en -- "$0")       # Full path to script
+PRG=${PRG0##*/}                    # Script basename
+readonly -- VERSION PRG0 PRG
 
-# Header output option
-declare -i USE_FILE_HEADER=0
+# Global variable declarations
+declare -i VERBOSE=1 COMPRESS=0 QUALITY=90 USE_FILE_HEADER=0
+declare -- COMPRESS_MODE='optimize'  # 'optimize' or 'resize'
 declare -- FILE_HEADER='```text {}\n'
 declare -- FILE_FOOTER='\n```\n\n'
 
+# Executable paths (will be set later)
+declare -- CLIP=''
+declare -- CONVERT=''
+declare -- OPTIPNG=''
+declare -- PNGQUANT=''
+
+# Color support for terminal output
+#shellcheck disable=SC2015
+[[ -t 2 ]] && declare -- RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m' || declare -- RED='' GREEN='' YELLOW='' CYAN='' NC=''
+readonly -- RED GREEN YELLOW CYAN NC
+
+# Utility functions
 decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
 
-vinfo() { ((VERBOSE)) || return 0; echo "$PRG: $*"; }
-verror() { >&2 echo "$PRG: $*"; }
+# Core message function using FUNCNAME for context
+_msg() {
+  local -- status="${FUNCNAME[1]}" prefix="$PRG" msg
+  case "$status" in
+    success) prefix+=": ${GREEN}✓${NC}" ;;
+    warn)    prefix+=": ${YELLOW}⚡${NC}" ;;
+    info)    prefix+=": ${CYAN}◉${NC}" ;;
+    error)   prefix+=": ${RED}✗${NC}" ;;
+    *) ;;
+  esac
+  for msg in "$@"; do printf '%s %s\n' "$prefix" "$msg"; done
+}
+# Messaging functions
+success() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+warn() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+info() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+error() { >&2 _msg "$@"; }
+die() { (($# > 1)) && error "${@:2}"; exit "${1:-0}"; }
+
+yn() {
+  read -r -n1 -p "$PRG: $YELLOW$1$NC y/n "
+  echo
+  [[ ${REPLY,,} == y ]]
+}
 
 # Display help information
 usage() {
@@ -62,12 +84,15 @@ Options:
                   [$(decp COMPRESS) $(decp COMPRESS_MODE)]
   -Q, --quality N Set compression quality/level (1-100, $(decp QUALITY))
 
-  -f,--use-file-header
-                 [$(decp USE_FILE_HEADER)]
-  -H,--file-header FILE_HEADER
-                 [$(decp FILE_HEADER)]
-  -F,--file-footer FILE_FOOTER
-                 [$(decp FILE_FOOTER)]
+  -f, --use-file-header
+                  Add header/footer to copied files
+                  [$(decp USE_FILE_HEADER)]
+  -H, --file-header HEADER
+                  Custom file header (use {} for filename)
+                  [$(decp FILE_HEADER)]
+  -F, --file-footer FOOTER
+                  Custom file footer
+                  [$(decp FILE_FOOTER)]
 
   -v, --verbose   Enable verbose output (default)
   -q, --quiet     Disable verbose output
@@ -87,7 +112,7 @@ Examples:
   $PRG README.md CLAUDE.md -f -H '<file name="{}"><![CDATA[\n' -F ']]></file>\n\n'
 
 EOT
-  exit "${1:-1}"
+  exit "${1:-0}"
 }
 
 # Main function that handles argument parsing and operation mode selection
@@ -99,35 +124,41 @@ main() {
   local -i pastemode=0
 
   # Process command-line arguments
-  while (($#)); do case $1 in
+  while (($#)); do case "$1" in
     -f|--use-file-header)
                    USE_FILE_HEADER=1 ;;
     -H|--file-header)
-                   shift; FILE_HEADER="$1" ;;
+                   shift; FILE_HEADER="${1:-}" ;;
     -F|--file-footer)
-                   shift; FILE_FOOTER="$1" ;;
+                   shift; FILE_FOOTER="${1:-}" ;;
     -p|--paste)    pastemode=1 ;;
     -c|--compress) COMPRESS=1 ;;
-    -r|--resize)   COMPRESS=1; COMPRESS_MODE="resize" ;;
-    -Q|--quality)  shift; QUALITY=$1 ;;
+    -r|--resize)   COMPRESS=1; COMPRESS_MODE=resize ;;
+    -Q|--quality)  shift; QUALITY="${1:-}" ;;
     -v|--verbose)  VERBOSE=1 ;;
     -q|--quiet)    VERBOSE=0 ;;
     -V|--version)  echo "$PRG ${VERSION}"; exit 0 ;;
     -h|--help)     usage 0 ;;
-    -[fHFpcrQvqVh]*) #shellcheck disable=SC2046 # expand aggregated short options
+    -[fHFpcrQvqVh]*) # Handle combined short options
+                   #shellcheck disable=SC2046  # Intentional word splitting
                    set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
     --)            shift; Files+=( "$@" ); break ;;
-    -*)            verror "Bad option '$1'"; exit 22 ;;
+    -*)            die 22 "Invalid option '$1'" ;;
     *)             Files+=( "$1" ) ;;
   esac; shift; done
+
+  # Check for GUI environment
+  if [[ -z ${DISPLAY:-} ]] && [[ -z ${WAYLAND_DISPLAY:-} ]]; then
+    die 1 'No GUI detected. This script requires a graphical desktop environment.' \
+          'DISPLAY and WAYLAND_DISPLAY variables are not set.'
+  fi
 
   # Check if xclip is installed, install if missing
   CLIP=$(command -v xclip || true)
   if [[ -z $CLIP ]]; then
-    read -rn1 -p "$PRG: Install xclip? y/n "
-    [[ $REPLY == y ]] || exit
-    vinfo "Installing package 'xclip'"
-    sudo apt install -y xclip &>/dev/null
+    yn 'Install xclip?' || die 1 'xclip is required but not installed'
+    info 'Installing xclip'
+    sudo apt install -y xclip &>/dev/null || die 1 'Failed to install xclip'
     CLIP=$(command -v xclip)
   fi
 
@@ -137,19 +168,17 @@ main() {
     OPTIPNG=$(command -v optipng || true)
     CONVERT=$(command -v convert || true)
 
-    if [[ $COMPRESS_MODE == "optimize" ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; then
-      read -rn1 -p "$PRG: Install pngquant and optipng? y/n "
-      [[ $REPLY == y ]] || exit
-      vinfo "Installing PNG optimization tools"
+    if [[ $COMPRESS_MODE == optimize ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; then
+      yn 'Install pngquant and optipng?' || die 1 'Operation aborted'
+      info 'Installing PNG optimization tools'
       sudo apt install -y pngquant optipng &>/dev/null
       PNGQUANT=$(command -v pngquant || true)
       OPTIPNG=$(command -v optipng || true)
     fi
 
-    if [[ -z $CONVERT ]] && { [[ $COMPRESS_MODE == "resize" ]] || { [[ $COMPRESS_MODE == "optimize" ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; }; }; then
-      read -rn1 -p "$PRG: Install imagemagick? y/n "
-      [[ $REPLY == y ]] || exit
-      vinfo "Installing ImageMagick for image processing"
+    if [[ -z $CONVERT ]] && { [[ $COMPRESS_MODE == resize ]] || { [[ $COMPRESS_MODE == optimize ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; }; }; then
+      yn 'Install imagemagick?' || die 1 'Operation aborted'
+      info 'Installing ImageMagick for image processing'
       sudo apt install -y imagemagick &>/dev/null
       CONVERT=$(command -v convert)
     fi
@@ -164,51 +193,51 @@ main() {
 }
 
 # Copy content of one or more files to the clipboard
-# 
+#
 # Arguments:
 #   $@ - List of files to copy
-# 
+#
 # Returns:
 #   0 on success, 1 if no valid files were found
 copy_contents_of_files_to_clipboard() {
   local -a Files=()
   local -- file
+
   # Process each file argument
   for file in "$@"; do
     if [[ ! -f "$file" ]]; then
-      verror "File '$file' not found"
+      error "File '$file' not found"
       continue
     fi
     Files+=("$file")
   done
   # Check if we have any valid files
-  if ((${#Files[@]} == 0)); then
-    verror "No files to copy to clipboard"
-    return 1
-  fi
+  ((${#Files[@]})) || die 1 'No files to copy to clipboard'
   # Copy concatenated file contents to clipboard
-  "$CLIP" -selection clipboard < <(
-    local -i ccc=0
+  { local -i ccc=0
     for file in "${Files[@]}"; do
-      ccc+=1
-      fileheader "$ccc" "$file"
+      ((ccc+=1))
+      _fileheader "$ccc" "$file"
       cat -s -- "$file"
-      filefooter "$ccc" "$file"
+      _filefooter "$ccc" "$file"
     done
-  )
+  } | nohup "$CLIP" -selection clipboard -i >/dev/null 2>&1 &
   # Show success message if verbose mode enabled
-  vinfo "File$( ((${#Files[@]} == 1)) || echo 's' ) '${Files[*]}' copied to clipboard"
+  local -- plural=''
+  ((${#Files[@]} == 1)) || plural='s'
+  success "File${plural} '${Files[*]}' copied to clipboard"
 }
 
-fileheader() {
+# Internal helper for file header
+_fileheader() {
   ((USE_FILE_HEADER)) || return 0
   echo -en "${FILE_HEADER//\{\}/"$2"}"
-  return 0
 }
-filefooter() {
+
+# Internal helper for file footer
+_filefooter() {
   ((USE_FILE_HEADER)) || return 0
   echo -en "${FILE_FOOTER//\{\}/"$2"}"
-  return 0
 }
 
 # Paste clipboard contents to stdout or a file
@@ -218,7 +247,7 @@ filefooter() {
 #
 # Returns:
 #   0 on success, exits with code 1 if destination directory doesn't exist
-paste_contents_of_clipboard_to_file(){
+paste_contents_of_clipboard_to_file() {
   # Paste to stdout?
   if (($# == 0)); then
     "$CLIP" -selection clipboard -o
@@ -226,33 +255,23 @@ paste_contents_of_clipboard_to_file(){
   fi
 
   # Paste to file
-  (($# > 1)) && {
-    vinfo "Can only paste to one file: ${*:2} ignored"
-  }
+  (($# > 1)) && warn "Can only paste to one file: '${*:2}' ignored"
   local -- output_file="$1" dir_name temp_file temp_file2 file_size1 file_size2
   dir_name=$(dirname "$output_file")
+
   if [[ ! -d "$dir_name" ]]; then
-    vinfo "Directory '$dir_name' does not exist. Creating ..."
-    mkdir -p "$dir_name" || {
-      verror "Could not create '$dir_name"
-      return 1
-    }
+    info "Directory '$dir_name' does not exist. Creating ..."
+    mkdir -p "$dir_name" || die 1 "Could not create '$dir_name'"
   fi
-  if ((VERBOSE)) && [[ -f "$output_file" ]]; then
-    if [ -t 1 ]; then
-      verror "'$output_file' already exists."
-      read -rn1 -p "$PRG: Overwrite? y/n "
-      [[ $REPLY == y ]] || { verror "Operation aborted"; return 1; }
-    fi
+  if ((VERBOSE)) && [[ -f "$output_file" ]] && [[ -t 1 ]]; then
+    warn "'$output_file' already exists."
+    yn 'Overwrite?' || die 1 'Operation aborted'
   fi
-  if ! touch "$output_file"; then
-    verror "Could not create '$output_file'"
-    return 1
-  fi
+  touch "$output_file" || die 1 "Could not create '$output_file'"
   
   # Check if clipboard contains image data
   if "$CLIP" -selection clipboard -t TARGETS -o | grep -q "image/png"; then
-    vinfo "Detected image data in clipboard"
+    info 'Detected image data in clipboard'
     
     if ((COMPRESS)); then
       # Create temporary files
@@ -262,14 +281,14 @@ paste_contents_of_clipboard_to_file(){
       # First save the raw PNG
       "$CLIP" -selection clipboard -t image/png -o > "$temp_file"
       file_size1=$(stat -c%s "$temp_file")
-      vinfo "Original image size: $file_size1 bytes"
+      info "Original image size: $file_size1 bytes"
       
       if [[ $COMPRESS_MODE == "optimize" ]]; then
-        vinfo "Using PNG optimization"
+        info 'Using PNG optimization'
         
         # Try pngquant first for best compression
         if [[ -n "$PNGQUANT" ]]; then
-          vinfo "Optimizing with pngquant (quality: $QUALITY)"
+          info "Optimizing with pngquant (quality: $QUALITY)"
           "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file"
         elif [[ -n "$OPTIPNG" ]]; then
           # Calculate optipng level (0-7) from quality (0-100)
@@ -277,37 +296,37 @@ paste_contents_of_clipboard_to_file(){
           [[ $optilevel -lt 0 ]] && optilevel=0
           [[ $optilevel -gt 7 ]] && optilevel=7
           
-          vinfo "Optimizing with optipng (level: $optilevel)"
+          info "Optimizing with optipng (level: $optilevel)"
           "$OPTIPNG" -o"$optilevel" -quiet -out "$temp_file2" "$temp_file"
         elif [[ -n "$CONVERT" ]]; then
           # Fallback to ImageMagick with options that actually reduce size
-          vinfo "Optimizing with ImageMagick"
+          info 'Optimizing with ImageMagick'
           "$CONVERT" "$temp_file" -strip -define png:compression-filter=5 -define png:compression-level=9 -define png:compression-strategy=1 "$temp_file2"
         else
-          verror "No PNG optimization tools available"
+          warn 'No PNG optimization tools available'
           cp "$temp_file" "$temp_file2"
         fi
       else
         # Resize-based compression
         if [[ -n "$CONVERT" ]]; then
           # Convert quality (1-100) to resize percentage (1-100)
-          vinfo "Resizing image with quality: $QUALITY%"
+          info "Resizing image with quality: $QUALITY%"
           "$CONVERT" "$temp_file" -resize "$QUALITY%" "$temp_file2"
         else
-          verror "ImageMagick not available for resize compression"
+          warn 'ImageMagick not available for resize compression'
           cp "$temp_file" "$temp_file2"
         fi
       fi
       
       # Check if the compressed file is actually smaller
       file_size2=$(stat -c%s "$temp_file2")
-      vinfo "Compressed image size: $file_size2 bytes"
+      info "Compressed image size: $file_size2 bytes"
       
       if [[ $file_size2 -lt $file_size1 ]]; then
-        vinfo "Compression successful, saved $(( file_size1 - file_size2 )) bytes"
+        success "Compression successful, saved $(( file_size1 - file_size2 )) bytes"
         cp "$temp_file2" "$output_file"
       else
-        vinfo "Compression did not reduce file size, using original"
+        info 'Compression did not reduce file size, using original'
         cp "$temp_file" "$output_file"
       fi
       
@@ -323,7 +342,7 @@ paste_contents_of_clipboard_to_file(){
   fi
   
   # Show success message if verbose mode enabled
-  vinfo "Clipboard contents pasted to '$output_file'"
+  success "Clipboard contents pasted to '$output_file'"
 }
 
 : <<-'EOT'
