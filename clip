@@ -30,6 +30,9 @@ declare -- PNGQUANT=''
 readonly -- RED GREEN YELLOW CYAN NC
 
 # Utility functions
+# decp() - Display variable declaration without the 'declare' prefix
+# Usage: decp VAR1 [VAR2 ...]
+# Example: decp QUALITY outputs "QUALITY=90" instead of "declare -i QUALITY=90"
 decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
 
 # Core message function using FUNCNAME for context
@@ -134,7 +137,8 @@ main() {
     -p|--paste)    pastemode=1 ;;
     -c|--compress) COMPRESS=1 ;;
     -r|--resize)   COMPRESS=1; COMPRESS_MODE=resize ;;
-    -Q|--quality)  shift; QUALITY="${1:-}" ;;
+    -Q|--quality)  shift; QUALITY="${1:-90}"
+                   ((QUALITY >= 1 && QUALITY <= 100)) || die 22 "Quality must be 1-100, got: $QUALITY" ;;
     -v|--verbose)  VERBOSE=1 ;;
     -q|--quiet)    VERBOSE=0 ;;
     -V|--version)  echo "$PRG ${VERSION}"; exit 0 ;;
@@ -221,7 +225,7 @@ copy_contents_of_files_to_clipboard() {
       cat -s -- "$file"
       _filefooter "$ccc" "$file"
     done
-  } | nohup "$CLIP" -selection clipboard -i >/dev/null 2>&1 &
+  } | "$CLIP" -selection clipboard -i
   # Show success message if verbose mode enabled
   local -- plural=''
   ((${#Files[@]} == 1)) || plural='s'
@@ -277,7 +281,8 @@ paste_contents_of_clipboard_to_file() {
       # Create temporary files
       temp_file=$(mktemp)
       temp_file2=$(mktemp)
-      
+      trap 'rm -f "$temp_file" "$temp_file2"' EXIT ERR
+
       # First save the raw PNG
       "$CLIP" -selection clipboard -t image/png -o > "$temp_file"
       file_size1=$(stat -c%s "$temp_file")
@@ -289,19 +294,17 @@ paste_contents_of_clipboard_to_file() {
         # Try pngquant first for best compression
         if [[ -n "$PNGQUANT" ]]; then
           info "Optimizing with pngquant (quality: $QUALITY)"
-          "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file"
+          "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file" || warn "pngquant failed, using fallback"
         elif [[ -n "$OPTIPNG" ]]; then
           # Calculate optipng level (0-7) from quality (0-100)
-          local optilevel=$(( 7 - QUALITY / 15 ))
-          [[ $optilevel -lt 0 ]] && optilevel=0
-          [[ $optilevel -gt 7 ]] && optilevel=7
-          
+          local -i optilevel=$(( 7 - QUALITY / 15 ))
+
           info "Optimizing with optipng (level: $optilevel)"
-          "$OPTIPNG" -o"$optilevel" -quiet -out "$temp_file2" "$temp_file"
+          "$OPTIPNG" -o"$optilevel" -quiet -out "$temp_file2" "$temp_file" || warn "optipng failed, using fallback"
         elif [[ -n "$CONVERT" ]]; then
           # Fallback to ImageMagick with options that actually reduce size
           info 'Optimizing with ImageMagick'
-          "$CONVERT" "$temp_file" -strip -define png:compression-filter=5 -define png:compression-level=9 -define png:compression-strategy=1 "$temp_file2"
+          "$CONVERT" "$temp_file" -strip -define png:compression-filter=5 -define png:compression-level=9 -define png:compression-strategy=1 "$temp_file2" || warn "ImageMagick optimization failed, using fallback"
         else
           warn 'No PNG optimization tools available'
           cp "$temp_file" "$temp_file2"
@@ -311,7 +314,7 @@ paste_contents_of_clipboard_to_file() {
         if [[ -n "$CONVERT" ]]; then
           # Convert quality (1-100) to resize percentage (1-100)
           info "Resizing image with quality: $QUALITY%"
-          "$CONVERT" "$temp_file" -resize "$QUALITY%" "$temp_file2"
+          "$CONVERT" "$temp_file" -resize "$QUALITY%" "$temp_file2" || warn "ImageMagick resize failed, using fallback"
         else
           warn 'ImageMagick not available for resize compression'
           cp "$temp_file" "$temp_file2"
@@ -319,19 +322,21 @@ paste_contents_of_clipboard_to_file() {
       fi
       
       # Check if the compressed file is actually smaller
-      file_size2=$(stat -c%s "$temp_file2")
-      info "Compressed image size: $file_size2 bytes"
-      
-      if [[ $file_size2 -lt $file_size1 ]]; then
-        success "Compression successful, saved $(( file_size1 - file_size2 )) bytes"
-        cp "$temp_file2" "$output_file"
+      if [[ -s "$temp_file2" ]]; then
+        file_size2=$(stat -c%s "$temp_file2")
+        info "Compressed image size: $file_size2 bytes"
+
+        if ((file_size2 < file_size1)); then
+          success "Compression successful, saved $(( file_size1 - file_size2 )) bytes"
+          cp "$temp_file2" "$output_file"
+        else
+          info 'Compression did not reduce file size, using original'
+          cp "$temp_file" "$output_file"
+        fi
       else
-        info 'Compression did not reduce file size, using original'
+        info 'Using original image (compression failed or did not reduce size)'
         cp "$temp_file" "$output_file"
       fi
-      
-      # Remove temporary files
-      rm -f "$temp_file" "$temp_file2"
     else
       # Write image directly to file without compression
       "$CLIP" -selection clipboard -t image/png -o > "$output_file"
