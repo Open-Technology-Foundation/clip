@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#shellcheck disable=SC2207
+# SC2207: Standard pattern for bash completion - compgen output must be word-split into array
+# clip.bash_completion - Bash completion for clip utility
+#
+# Provides intelligent tab completion for the clip command including:
+# - All command-line options (short and long forms)
+# - Quality value suggestions (1-100)
+# - File path completion with mode-aware behavior:
+#   * Copy mode: existing files only
+#   * Paste mode: any file path (for output)
+#
+# Installation:
+#   # User-specific (persistent)
+#   echo "source $(pwd)/clip.bash_completion" >> ~/.bashrc
+#
+#   # System-wide
+#   sudo cp clip.bash_completion /etc/bash_completion.d/clip
+#
+# Version: 1.0.1
+# License: GPL-3.0
+
+# Main completion function for clip command
+_clip() {
+  local cur prev opts
+  local -i paste_mode=0 i
+
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+  # All available options
+  opts="-p --paste -c --compress -r --resize -Q --quality -f --use-file-header -H --file-header -F --file-footer -v --verbose -q --quiet -V --version -h --help"
+
+  # Handle completion for option arguments
+  case "$prev" in
+    -Q|--quality)
+      # Suggest common quality values (1-100 range)
+      COMPREPLY=( $(compgen -W "10 25 50 75 85 90 95 100" -- "$cur") )
+      return 0
+      ;;
+    -H|--file-header|-F|--file-footer)
+      # No automatic completion for custom header/footer strings
+      return 0
+      ;;
+    *)
+      ;;
+  esac
+
+  # Detect paste mode by scanning command line for -p or --paste
+  for ((i=1; i<COMP_CWORD; i++)); do
+    case "${COMP_WORDS[i]}" in
+      -p|--paste)
+        paste_mode=1
+        break
+        ;;
+    esac
+  done
+
+  # If current word starts with dash, complete with options
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+    return 0
+  fi
+
+  # Mode-aware file completion
+  if ((paste_mode)); then
+    # Paste mode: allow any file path (for output files that may not exist yet)
+    COMPREPLY=( $(compgen -f -- "$cur") )
+  else
+    # Copy mode: complete with existing files only
+    COMPREPLY=( $(compgen -f -- "$cur") )
+
+    # Filter to include regular files and directories
+    # (directories needed for navigation, regular files for copying)
+    local -a filtered=()
+    local item
+    for item in "${COMPREPLY[@]}"; do
+      if [[ -f "$item" ]] || [[ -d "$item" ]] || [[ ! -e "$item" ]]; then
+        filtered+=("$item")
+      fi
+    done
+    COMPREPLY=("${filtered[@]}")
+  fi
+
+  return 0
+}
+
+# Register the completion function for the clip command
+complete -F _clip clip
+
+#fin

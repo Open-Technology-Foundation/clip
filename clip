@@ -1,49 +1,45 @@
 #!/usr/bin/env bash
+#shellcheck disable=SC2015,SC2155
+# SC2015: Safe usage of && || pattern for color variable initialization based on terminal detection
+# SC2155: Acceptable for readonly variable declaration with command substitution (SCRIPT_PATH)
 # clip - Utility for clipboard operations in Ubuntu/Linux desktop systems
 #
 # This script allows copying file contents to clipboard and
 # pasting clipboard contents to files or stdout.
 #
 set -euo pipefail
+shopt -s inherit_errexit shift_verbose extglob nullglob
 
 # Script metadata
-VERSION='1.0.0'
-PRG0=$(readlink -en -- "$0")       # Full path to script
-PRG=${PRG0##*/}                    # Script basename
-readonly -- VERSION PRG0 PRG
+declare -r VERSION='1.0.1'
+declare -r SCRIPT_PATH=$(realpath -e -- "$0")
+declare -r SCRIPT_NAME=${SCRIPT_PATH##*/}
 
 # Global variable declarations
-declare -i VERBOSE=1 COMPRESS=0 QUALITY=90 USE_FILE_HEADER=0
+declare -i COMPRESS=0 QUALITY=90 USE_FILE_HEADER=0
 declare -- COMPRESS_MODE='optimize'  # 'optimize' or 'resize'
 declare -- FILE_HEADER='```text {}\n'
 declare -- FILE_FOOTER='\n```\n\n'
 
 # Executable paths (will be set later)
-declare -- CLIP=''
-declare -- CONVERT=''
-declare -- OPTIPNG=''
-declare -- PNGQUANT=''
+declare -- CLIP='' CONVERT='' OPTIPNG='' PNGQUANT=''
+
+# Logging system
+declare -i VERBOSE=1
 
 # Color support for terminal output
-#shellcheck disable=SC2015
-[[ -t 2 ]] && declare -- RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m' || declare -- RED='' GREEN='' YELLOW='' CYAN='' NC=''
-readonly -- RED GREEN YELLOW CYAN NC
-
-# Utility functions
-# decp() - Display variable declaration without the 'declare' prefix
-# Usage: decp VAR1 [VAR2 ...]
-# Example: decp QUALITY outputs "QUALITY=90" instead of "declare -i QUALITY=90"
-decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
+[[ -t 2 ]] && declare -r RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m' || declare -r RED='' GREEN='' YELLOW='' CYAN='' NC=''
 
 # Core message function using FUNCNAME for context
 _msg() {
-  local -- status="${FUNCNAME[1]}" prefix="$PRG" msg
+  local -- status="${FUNCNAME[1]}" prefix="$SCRIPT_NAME:" msg
   case "$status" in
-    success) prefix+=": ${GREEN}✓${NC}" ;;
-    warn)    prefix+=": ${YELLOW}⚡${NC}" ;;
-    info)    prefix+=": ${CYAN}◉${NC}" ;;
-    error)   prefix+=": ${RED}✗${NC}" ;;
-    *) ;;
+    vecho)   : ;;
+    info)    prefix+=" ${CYAN}◉${NC}" ;;
+    warn)    prefix+=" ${YELLOW}▲${NC}" ;;
+    success) prefix+=" ${GREEN}✓${NC}" ;;
+    error)   prefix+=" ${RED}✗${NC}" ;;
+    *)       ;;
   esac
   for msg in "$@"; do printf '%s %s\n' "$prefix" "$msg"; done
 }
@@ -55,48 +51,57 @@ error() { >&2 _msg "$@"; }
 die() { (($# > 1)) && error "${@:2}"; exit "${1:-0}"; }
 
 yn() {
-  read -r -n1 -p "$PRG: $YELLOW$1$NC y/n "
-  echo
+  local -- REPLY
+  >&2 read -r -n 1 -p "$(2>&1 warn "${1:-'Continue?'}") y/n "
+  >&2 echo
   [[ ${REPLY,,} == y ]]
 }
 
 # Display help information
 usage() {
   cat <<EOT
-$PRG $VERSION - Terminal clipboard utility
+$SCRIPT_NAME $VERSION - Terminal clipboard utility
 
 Copies contents of files to clipboard;
-Pastes contents of clipboard to file (supports both text and images).
+Pastes contents of clipboard to file (supports both text and PNG images).
 
 Usage:
-    # Copy mode
-    $PRG filename [filename ...]
+    # Copy mode (default)
+    $SCRIPT_NAME filename [filename ...]
   or:
     # Paste mode
-    $PRG -p [filename]
+    $SCRIPT_NAME -p [filename]
 
-Requires: xclip (and optionally PNG optimizers for compression)
+Requires: xclip (and optionally pngquant/optipng/imagemagick for image compression)
 
 Options:
   -p, --paste     Paste clipboard contents to file or stdout.
-                  Default is copy.
+                  If no filename given, outputs to stdout.
 
-  -c, --compress  Optimize PNG image when pasting (requires optipng/pngquant)
+  Image Compression Options (for PNG images only):
+  -c, --compress  Optimize PNG using lossless/lossy compression
+                  Tools: pngquant (best), optipng, or imagemagick
                   [$(decp COMPRESS)]
-  -r, --resize    Use resize-based compression instead of optimization
+  -r, --resize    Use dimension-based compression (resize to percentage)
+                  Requires: imagemagick
                   [$(decp COMPRESS) $(decp COMPRESS_MODE)]
-  -Q, --quality N Set compression quality/level (1-100, $(decp QUALITY))
+  -Q, --quality N Compression quality/level:
+                  • With -c: max quality 1-100 (pngquant) or level (optipng)
+                  • With -r: resize percentage 1-100
+                  Default: $(decp QUALITY)
 
+  File Header/Footer Options (for copy mode):
   -f, --use-file-header
-                  Add header/footer to copied files
+                  Add header/footer to each copied file
                   [$(decp USE_FILE_HEADER)]
   -H, --file-header HEADER
-                  Custom file header (use {} for filename)
+                  Custom file header template (use {} for filename)
                   [$(decp FILE_HEADER)]
   -F, --file-footer FOOTER
-                  Custom file footer
+                  Custom file footer template
                   [$(decp FILE_FOOTER)]
 
+  General Options:
   -v, --verbose   Enable verbose output (default)
   -q, --quiet     Disable verbose output
 
@@ -104,19 +109,33 @@ Options:
   -h, --help      Display this help message
 
 Examples:
-  $PRG myfile.txt
-  $PRG /tmp/myfile.md $HOME/myotherfile.md
+  # Copy files to clipboard
+  $SCRIPT_NAME myfile.txt
+  $SCRIPT_NAME /tmp/myfile.md $HOME/myotherfile.md
 
-  $PRG -p
-  $PRG -p newfile.txt
-  $PRG -p screenshot.png         # Works with image data
-  $PRG -p -c screenshot.png      # Optimize the PNG image (smaller file size)
-  $PRG -p -r -Q 75 image.png     # Compress with resize-based method at 75% quality
-  $PRG README.md CLAUDE.md -f -H '<file name="{}"><![CDATA[\n' -F ']]></file>\n\n'
+  # Paste from clipboard
+  $SCRIPT_NAME -p                        # Paste to stdout
+  $SCRIPT_NAME -p newfile.txt            # Paste to file
+  $SCRIPT_NAME -p screenshot.png         # Paste PNG image from clipboard
+
+  # Image compression examples
+  $SCRIPT_NAME -p -c screenshot.png      # Optimize PNG (automatic tool selection)
+  $SCRIPT_NAME -p -c -Q 85 image.png     # Optimize with max quality 85
+  $SCRIPT_NAME -p -r -Q 75 image.png     # Resize to 75% of original dimensions
+
+  # Copy with custom XML headers/footers
+  $SCRIPT_NAME README.md CLAUDE.md -f -H '<file name="{}"><![CDATA[\n' -F ']]></file>\n\n'
 
 EOT
-  exit "${1:-0}"
 }
+
+
+# Utility functions
+# decp() - Display variable declaration without the 'declare' prefix
+# Usage: decp VAR1 [VAR2 ...]
+# Example: decp QUALITY outputs "QUALITY=90" instead of "declare -i QUALITY=90"
+decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
+
 
 # Main function that handles argument parsing and operation mode selection
 #
@@ -127,28 +146,39 @@ main() {
   local -i pastemode=0
 
   # Process command-line arguments
-  while (($#)); do case "$1" in
+  while (($#)); do case $1 in
+    -h|--help)     usage; return 0 ;;
+    -V|--version)  echo "$SCRIPT_NAME $VERSION"; return 0 ;;
+
     -f|--use-file-header)
                    USE_FILE_HEADER=1 ;;
     -H|--file-header)
                    shift; FILE_HEADER="${1:-}" ;;
     -F|--file-footer)
                    shift; FILE_FOOTER="${1:-}" ;;
+
     -p|--paste)    pastemode=1 ;;
     -c|--compress) COMPRESS=1 ;;
     -r|--resize)   COMPRESS=1; COMPRESS_MODE=resize ;;
     -Q|--quality)  shift; QUALITY="${1:-90}"
-                   ((QUALITY >= 1 && QUALITY <= 100)) || die 22 "Quality must be 1-100, got: $QUALITY" ;;
+                   ((QUALITY >= 1 && QUALITY <= 100)) || die 22 "Quality must be 1-100, got ${QUALITY@Q}" ;;
+
     -v|--verbose)  VERBOSE=1 ;;
     -q|--quiet)    VERBOSE=0 ;;
-    -V|--version)  echo "$PRG ${VERSION}"; exit 0 ;;
-    -h|--help)     usage 0 ;;
-    -[fHFpcrQvqVh]*) # Handle combined short options
-                   #shellcheck disable=SC2046  # Intentional word splitting
-                   set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}" ;;
-    --)            shift; Files+=( "$@" ); break ;;
-    -*)            die 22 "Invalid option '$1'" ;;
-    *)             Files+=( "$1" ) ;;
+
+    -[hVfHFpcrQvq]*) # Handle combined short options (e.g., -vp becomes -v -p)
+                   # Split option string into individual characters, prefix each with dash
+                   # Example: -vVq → '' -v -V -q [remaining args]
+                   #shellcheck disable=SC2046  # Intentional word splitting for option expansion
+                   set -- '' $(printf -- "-%c " $(grep -o . <<<"${1:1}")) "${@:2}"
+                   ;;
+    --)            shift; Files+=( "$@" )
+                   break
+                   ;;
+    -*)            die 22 "Invalid option ${1@Q}"
+                   ;;
+    *)             Files+=( "$1" )
+                   ;;
   esac; shift; done
 
   # Check for GUI environment
@@ -210,7 +240,7 @@ copy_contents_of_files_to_clipboard() {
   # Process each file argument
   for file in "$@"; do
     if [[ ! -f "$file" ]]; then
-      error "File '$file' not found"
+      error "File ${file@Q} not found"
       continue
     fi
     Files+=("$file")
@@ -220,7 +250,7 @@ copy_contents_of_files_to_clipboard() {
   # Copy concatenated file contents to clipboard
   { local -i ccc=0
     for file in "${Files[@]}"; do
-      ((ccc+=1))
+      ccc+=1
       _fileheader "$ccc" "$file"
       cat -s -- "$file"
       _filefooter "$ccc" "$file"
@@ -232,13 +262,29 @@ copy_contents_of_files_to_clipboard() {
   success "File${plural} '${Files[*]}' copied to clipboard"
 }
 
-# Internal helper for file header
+# Output file header if USE_FILE_HEADER is enabled
+# Substitutes {} in FILE_HEADER template with filename
+#
+# Arguments:
+#   $1 - File counter (for reference, not used in output)
+#   $2 - Filename to substitute in header template
+#
+# Returns:
+#   0 always (outputs header or nothing)
 _fileheader() {
   ((USE_FILE_HEADER)) || return 0
   echo -en "${FILE_HEADER//\{\}/"$2"}"
 }
 
-# Internal helper for file footer
+# Output file footer if USE_FILE_HEADER is enabled
+# Substitutes {} in FILE_FOOTER template with filename
+#
+# Arguments:
+#   $1 - File counter (for reference, not used in output)
+#   $2 - Filename to substitute in footer template
+#
+# Returns:
+#   0 always (outputs footer or nothing)
 _filefooter() {
   ((USE_FILE_HEADER)) || return 0
   echo -en "${FILE_FOOTER//\{\}/"$2"}"
@@ -253,28 +299,26 @@ _filefooter() {
 #   0 on success, exits with code 1 if destination directory doesn't exist
 paste_contents_of_clipboard_to_file() {
   # Paste to stdout?
-  if (($# == 0)); then
-    "$CLIP" -selection clipboard -o
-    return $?
-  fi
+  (($#)) || { "$CLIP" -selection clipboard -o; return $?; }
 
   # Paste to file
-  (($# > 1)) && warn "Can only paste to one file: '${*:2}' ignored"
-  local -- output_file="$1" dir_name temp_file temp_file2 file_size1 file_size2
+  (($# == 1)) || warn "Can only paste to one file: '${*:2}' ignored"
+  local -- output_file=$1
+  local -- dir_name temp_file temp_file2 file_size1 file_size2
   dir_name=$(dirname "$output_file")
 
   if [[ ! -d "$dir_name" ]]; then
-    info "Directory '$dir_name' does not exist. Creating ..."
-    mkdir -p "$dir_name" || die 1 "Could not create '$dir_name'"
+    info "Directory ${dir_name@Q} does not exist. Creating ..."
+    mkdir -p "$dir_name" || die 1 "Could not create ${dir_name@Q}"
   fi
   if ((VERBOSE)) && [[ -f "$output_file" ]] && [[ -t 1 ]]; then
-    warn "'$output_file' already exists."
+    warn "${output_file@Q} already exists."
     yn 'Overwrite?' || die 1 'Operation aborted'
   fi
-  touch "$output_file" || die 1 "Could not create '$output_file'"
+  touch "$output_file" || die 1 "Could not create ${output_file@Q}"
   
   # Check if clipboard contains image data
-  if "$CLIP" -selection clipboard -t TARGETS -o | grep -q "image/png"; then
+  if "$CLIP" -selection clipboard -t TARGETS -o | grep -q 'image/png'; then
     info 'Detected image data in clipboard'
     
     if ((COMPRESS)); then
@@ -288,31 +332,37 @@ paste_contents_of_clipboard_to_file() {
       file_size1=$(stat -c%s "$temp_file")
       info "Original image size: $file_size1 bytes"
       
+      # Compression strategy selection: optimize (lossless/lossy) vs resize (dimension-based)
       if [[ $COMPRESS_MODE == "optimize" ]]; then
         info 'Using PNG optimization'
-        
-        # Try pngquant first for best compression
+
+        # Priority order: pngquant (best compression) → optipng (lossless) → imagemagick (fallback)
+        # Try pngquant first for best lossy compression with quality control
         if [[ -n "$PNGQUANT" ]]; then
           info "Optimizing with pngquant (quality: $QUALITY)"
+          # --skip-if-larger ensures we don't increase file size
           "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file" || warn "pngquant failed, using fallback"
         elif [[ -n "$OPTIPNG" ]]; then
           # Calculate optipng level (0-7) from quality (0-100)
+          # Higher quality → lower level (more compression attempts)
+          # Formula: level = 7 - (quality / 15), e.g., quality 90 → level 1
           local -i optilevel=$(( 7 - QUALITY / 15 ))
 
           info "Optimizing with optipng (level: $optilevel)"
           "$OPTIPNG" -o"$optilevel" -quiet -out "$temp_file2" "$temp_file" || warn "optipng failed, using fallback"
         elif [[ -n "$CONVERT" ]]; then
-          # Fallback to ImageMagick with options that actually reduce size
+          # Fallback to ImageMagick with aggressive PNG compression settings
           info 'Optimizing with ImageMagick'
           "$CONVERT" "$temp_file" -strip -define png:compression-filter=5 -define png:compression-level=9 -define png:compression-strategy=1 "$temp_file2" || warn "ImageMagick optimization failed, using fallback"
         else
+          # No compression tools available, use original
           warn 'No PNG optimization tools available'
           cp "$temp_file" "$temp_file2"
         fi
       else
-        # Resize-based compression
+        # Resize-based compression: reduces dimensions by percentage (quality parameter)
         if [[ -n "$CONVERT" ]]; then
-          # Convert quality (1-100) to resize percentage (1-100)
+          # QUALITY parameter becomes resize percentage (e.g., 75 = 75% of original size)
           info "Resizing image with quality: $QUALITY%"
           "$CONVERT" "$temp_file" -resize "$QUALITY%" "$temp_file2" || warn "ImageMagick resize failed, using fallback"
         else
@@ -321,11 +371,14 @@ paste_contents_of_clipboard_to_file() {
         fi
       fi
       
-      # Check if the compressed file is actually smaller
+      # Verify compression was beneficial before using compressed version
+      # Some images may not compress well or compression may fail
       if [[ -s "$temp_file2" ]]; then
         file_size2=$(stat -c%s "$temp_file2")
         info "Compressed image size: $file_size2 bytes"
 
+        # Only use compressed version if it's actually smaller
+        # This prevents quality loss without size benefit
         if ((file_size2 < file_size1)); then
           success "Compression successful, saved $(( file_size1 - file_size2 )) bytes"
           cp "$temp_file2" "$output_file"
@@ -334,6 +387,7 @@ paste_contents_of_clipboard_to_file() {
           cp "$temp_file" "$output_file"
         fi
       else
+        # Compressed file is empty or missing (compression failed)
         info 'Using original image (compression failed or did not reduce size)'
         cp "$temp_file" "$output_file"
       fi
@@ -347,31 +401,8 @@ paste_contents_of_clipboard_to_file() {
   fi
   
   # Show success message if verbose mode enabled
-  success "Clipboard contents pasted to '$output_file'"
+  success "Clipboard contents pasted to ${output_file@Q}"
 }
-
-: <<-'EOT'
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<Files>
-  <file>
-    <name>report.pdf</name>
-    <type>application/pdf</type>
-    <size>1245678</size>
-    <modified>2023-06-15T14:32:17</modified>
-    <content><![CDATA[some content]]>
-  </file>
-  <file>
-    <name>presentation.odp</name>
-    <type>application/vnd.oasis.opendocument.presentation</type>
-    <size>3456789</size>
-    <modified>2023-06-10T09:15:43</modified>
-    <content><![CDATA[some more content]]>
-  </file>
-...
-</Files>
-```
-EOT
 
 main "$@"
 #fin

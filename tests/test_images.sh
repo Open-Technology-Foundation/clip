@@ -12,42 +12,33 @@ fi
 
 setup_test
 
-# Test: Copy JPEG image
+# Test: JPEG image fixture availability
 jpeg_file="$FIXTURES_DIR/shen2.jpg"
 if [[ -f "$jpeg_file" ]]; then
-  # Note: clip doesn't support copying images TO clipboard, only pasting FROM clipboard
-  # So we'll test with pre-loaded clipboard content if possible
   info "JPEG test file available: $jpeg_file"
-
-  # We can test that the script handles image files correctly when trying to copy
-  output=$("$CLIP_CMD" "$jpeg_file" 2>&1 || true)
-  # The script will copy the binary content, which might work but won't be useful
-  pass "JPEG file can be processed (as text)"
+  # Note: clip doesn't support copying images TO clipboard (only text files)
+  # It's designed to PASTE images FROM clipboard (e.g., screenshots)
+  pass "JPEG fixture exists for manual testing"
 else
-  skip_test "JPEG image copy test" "shen2.jpg not found"
+  skip_test "JPEG image fixture" "shen2.jpg not found"
 fi
 
-# Test: PNG image operations
+# Test: PNG image fixture and options
 png_file="$FIXTURES_DIR/sim-indonesia.png"
 if [[ -f "$png_file" ]]; then
   info "PNG test file available: $png_file"
-
-  # Test copying PNG file (will copy as text/binary)
-  output=$("$CLIP_CMD" "$png_file" 2>&1 || true)
-  pass "PNG file can be processed (as text)"
-
-  # To properly test image paste, we need to have image data in clipboard
-  # This would typically be done by taking a screenshot or copying an image from a GUI app
-  # Since we can't reliably do that in automated tests, we'll test the mechanics
+  # Note: clip doesn't support copying images TO clipboard (only text files)
+  # It's designed to PASTE images FROM clipboard (e.g., screenshots)
+  pass "PNG fixture exists for manual testing"
 
   # Test: Check if image tools are available
   if check_image_tools; then
     info "Image optimization tools available"
 
-    # Test: Compression options are accepted
-    assert_success "Compression option -c accepted" "$CLIP_CMD" -h
-    assert_success "Resize option -r accepted" "$CLIP_CMD" -h
-    assert_success "Quality option -Q accepted" "$CLIP_CMD" -h
+    # Test: Compression options are accepted in help
+    assert_success "Compression option -c in help" "$CLIP_CMD" -h
+    assert_success "Resize option -r in help" "$CLIP_CMD" -h
+    assert_success "Quality option -Q in help" "$CLIP_CMD" -h
 
     # Test: Try paste with compression (will fail if no image in clipboard)
     output=$("$CLIP_CMD" -p -c "$OUTPUT_DIR/test_compressed.png" 2>&1 || true)
@@ -84,6 +75,7 @@ if [[ -f "$png_file" ]]; then
   if command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" ]]; then
     # Try to load PNG into clipboard
     if xclip -selection clipboard -t image/png -i "$png_file" 2>/dev/null; then
+      sleep 0.3  # Allow clipboard to settle after loading image
       info "Loaded PNG into clipboard for testing"
 
       # Test: Paste PNG from clipboard
@@ -93,6 +85,7 @@ if [[ -f "$png_file" ]]; then
 
       # Test: Paste with optimization
       if check_image_tools; then
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -c "$OUTPUT_DIR/optimized.png" 2>&1 || true)
         assert_output "Optimization shows status" "image size" "$output"
         assert_file_exists "Optimized PNG created" "$OUTPUT_DIR/optimized.png"
@@ -112,16 +105,20 @@ if [[ -f "$png_file" ]]; then
         fi
 
         # Test: Different quality levels
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -c -Q 30 "$OUTPUT_DIR/low_quality.png" 2>&1 || true)
         assert_file_exists "Low quality PNG created" "$OUTPUT_DIR/low_quality.png"
 
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -c -Q 90 "$OUTPUT_DIR/high_quality.png" 2>&1 || true)
         assert_file_exists "High quality PNG created" "$OUTPUT_DIR/high_quality.png"
 
         # Test: Resize mode with different percentages
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -r -Q 25 "$OUTPUT_DIR/quarter_size.png" 2>&1 || true)
         assert_file_exists "25% resized PNG created" "$OUTPUT_DIR/quarter_size.png"
 
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -r -Q 75 "$OUTPUT_DIR/three_quarter_size.png" 2>&1 || true)
         assert_file_exists "75% resized PNG created" "$OUTPUT_DIR/three_quarter_size.png"
 

@@ -12,18 +12,18 @@ assert_output "Help contains usage examples" "Examples:" "$output"
 
 # Test: Version option
 output=$("$CLIP_CMD" -V 2>&1 || true)
-assert_output "Version option (-V) displays version" "clip 0.8" "$output"
+assert_output "Version option (-V) displays version" "clip 1.0.0" "$output"
 
 # Test: Invalid option handling
 assert_failure "Invalid option returns error" "$CLIP_CMD" --invalid-option
 
 # Test: Quiet mode
 output=$("$CLIP_CMD" -q -V 2>&1 || true)
-assert_equal "Quiet mode suppresses verbose output" "clip 0.8.5" "$output"
+assert_equal "Quiet mode suppresses verbose output" "clip 1.0.0" "$output"
 
 # Test: Combined short options
 output=$("$CLIP_CMD" -vV 2>&1 || true)
-assert_output "Combined short options work (-vV)" "clip 0.8" "$output"
+assert_output "Combined short options work (-vV)" "clip 1.0.0" "$output"
 
 # Test: File not found error
 if check_xclip; then
