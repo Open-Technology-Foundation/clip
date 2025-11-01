@@ -21,6 +21,7 @@ setup_test
 png_file="$FIXTURES_DIR/sim-indonesia.png"
 if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" ]]; then
   if xclip -selection clipboard -t image/png -i "$png_file" 2>/dev/null; then
+    sleep 0.3  # Allow clipboard to settle after loading image
     info "PNG loaded into clipboard for compression tests"
 
     # Test: Optimization with pngquant
@@ -31,6 +32,7 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
 
       # Test different quality levels
       for quality in 20 40 60 80 100; do
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -c -Q "$quality" "$OUTPUT_DIR/pngquant_q${quality}.png" 2>&1 || true)
         assert_file_exists "pngquant quality $quality works" "$OUTPUT_DIR/pngquant_q${quality}.png"
       done
@@ -49,6 +51,7 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
 
     # Test: Optimization with optipng
     if command -v optipng &>/dev/null; then
+      sleep 0.2  # Allow previous operation to complete
       output=$("$CLIP_CMD" -p -c -Q 50 "$OUTPUT_DIR/optipng_test.png" 2>&1 || true)
       if [[ "$output" == *"optipng"* ]]; then
         pass "optipng optimization runs when available"
@@ -62,6 +65,7 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
     if command -v convert &>/dev/null; then
       # Test various resize percentages
       for percent in 10 25 50 75 90 100 110; do
+        sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -r -Q "$percent" "$OUTPUT_DIR/resize_${percent}.png" 2>&1 || true)
         assert_file_exists "Resize ${percent}% works" "$OUTPUT_DIR/resize_${percent}.png"
       done
@@ -104,6 +108,7 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
       # Create a 1x1 PNG
       convert -size 1x1 xc:white "$TMP_DIR/tiny.png"
       if xclip -selection clipboard -t image/png -i "$TMP_DIR/tiny.png" 2>/dev/null; then
+        sleep 0.3  # Allow clipboard to settle after loading image
         output=$("$CLIP_CMD" -p -c "$OUTPUT_DIR/tiny_compressed.png" 2>&1 || true)
         if [[ "$output" == *"did not reduce"* ]] || [[ "$output" == *"using original"* ]]; then
           pass "Compression skipped when not beneficial"
@@ -114,6 +119,7 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
     fi
 
     # Test: Combined options
+    sleep 0.2  # Allow previous operation to complete
     output=$("$CLIP_CMD" -p -c -q "$OUTPUT_DIR/quiet_compress.png" 2>&1 || true)
     assert_equal "Quiet mode suppresses compression output" "" "$output"
     assert_file_exists "Quiet compression creates file" "$OUTPUT_DIR/quiet_compress.png"
@@ -133,6 +139,7 @@ assert_output "Help shows quality option" "--quality" "$output"
 
 # Test: Quality bounds
 for invalid_quality in -1 0 101 200; do
+  sleep 0.1  # Brief delay between operations
   output=$("$CLIP_CMD" -p -c -Q "$invalid_quality" "$OUTPUT_DIR/invalid_q.png" 2>&1 || true)
   # Quality might be clamped or cause an error
   # The script should handle it gracefully either way

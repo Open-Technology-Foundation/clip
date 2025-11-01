@@ -192,8 +192,8 @@ cleanup_test() {
 
 # Create a test file with content
 create_test_file() {
-  local -- filename="$1" content="${2:-Test content}"
-  echo "$content" > "$TMP_DIR/$filename"
+  local -- filename="$1" content="${2-Test content}"
+  printf '%s' "$content" > "$TMP_DIR/$filename"
   echo "$TMP_DIR/$filename"
 }
 
