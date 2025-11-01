@@ -53,19 +53,19 @@ For detailed installation options and manual installation, see [Installation](#i
 
 ## Features
 
-✓ **Text Operations**: Copy single or multiple files to clipboard, paste with formatting preservation
-✓ **PNG Image Support**: Intelligent image handling with clipboard detection
-✓ **Smart Compression**: Two modes with automatic tool selection:
+- ✓ **Text Operations**: Copy single or multiple files to clipboard, paste with formatting preservation
+- ✓ **PNG Image Support**: Intelligent image handling with clipboard detection
+- ✓ **Smart Compression**: Two modes with automatic tool selection:
   - **Optimize mode**: pngquant (best) → optipng → imagemagick (fallback)
   - **Resize mode**: Dimension-based compression via ImageMagick
-✓ **Intelligent Size Checking**: Only uses compressed version if actually smaller
-✓ **Auto-Installation**: Prompts for missing dependencies with user confirmation
-✓ **Flexible Output**: Paste to stdout or files with automatic directory creation
-✓ **Custom Formatting**: Add headers/footers when copying files (markdown, XML, etc.)
-✓ **Bash 5.2+ Modern Patterns**: `[[`, `(())`, proper arrays, nameref support
-✓ **Professional Error Handling**: `set -euo pipefail`, comprehensive input validation
-✓ **Safe Reinstallation**: Automatically replaces existing installations without prompts
-✓ **Verbose/Quiet Modes**: Control output verbosity for scripting or debugging
+- ✓ **Intelligent Size Checking**: Only uses compressed version if actually smaller
+- ✓ **Auto-Installation**: Prompts for missing dependencies with user confirmation
+- ✓ **Flexible Output**: Paste to stdout or files with automatic directory creation
+- ✓ **Custom Formatting**: Add headers/footers when copying files (markdown, XML, etc.)
+- ✓ **Bash 5.2+ Modern Patterns**: `[[`, `(())`, proper arrays, nameref support
+- ✓ **Professional Error Handling**: `set -euo pipefail`, comprehensive input validation
+- ✓ **Safe Reinstallation**: Automatically replaces existing installations without prompts
+- ✓ **Verbose/Quiet Modes**: Control output verbosity for scripting or debugging
 
 ## Code Quality
 
@@ -768,23 +768,23 @@ Contributions are welcome! Please ensure all submissions meet quality standards:
 
 ### Requirements for Pull Requests
 
-✓ **Code Quality**:
+**✓ Code Quality**:
 - ShellCheck clean (zero warnings)
 - BCS compliant
 - Bash 5.2+ patterns only
 - Comprehensive error handling
 
-✓ **Testing**:
+**✓ Testing**:
 - Add tests for new features
 - All existing tests must pass
 - Maintain >95% pass rate
 
-✓ **Documentation**:
+**✓ Documentation**:
 - Update README.md for user-facing changes
 - Update help text in script
 - Add inline comments for complex logic
 
-✓ **Security**:
+**✓ Security**:
 - No command injection risks
 - Proper input validation
 - Safe file operations
