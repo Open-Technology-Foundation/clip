@@ -833,6 +833,6 @@ Developed following the [Bash Coding Standard](https://github.com/Open-Technolog
 
 ---
 
-**clip 1.0.1** - Professional clipboard utility for Linux | BCS Compliant | Zero Vulnerabilities | 97.4% Test Pass Rate
+**clip 1.0.1** - Professional clipboard utility for Linux | BCS Compliant | Zero Vulnerabilities
 
 #fin
