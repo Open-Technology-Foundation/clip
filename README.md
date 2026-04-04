@@ -28,7 +28,7 @@ sudo make install      # System-wide installation
 ```bash
 git clone https://github.com/Open-Technology-Foundation/clip.git
 cd clip
-make install-user      # Installs to ~/.local/bin
+./install.sh           # Choose option 1 for ~/.local/bin
 ```
 
 For detailed installation options and manual installation, see [Installation](#installation).
@@ -129,14 +129,16 @@ sudo make install
 
 This installs:
 - Binary to `/usr/local/bin/clip`
-- Bash completion to `/usr/local/share/bash-completion/completions/clip`
-- Man page to `/usr/local/share/man/man1/clip.1.gz`
+- Man page to `/usr/local/share/man/man1/clip.1`
+- Bash completion to `/etc/bash_completion.d/clip` (if directory exists)
 
 **User-level installation** (no sudo required):
+
+Use the interactive install script:
 ```bash
 git clone https://github.com/Open-Technology-Foundation/clip.git
 cd clip
-make install-user
+./install.sh           # Choose option 1 for user-level install
 ```
 
 This installs:
@@ -151,9 +153,8 @@ This installs:
 ```bash
 make help           # Show all available targets
 make uninstall      # Remove system-wide installation
-make uninstall-user # Remove user installation
 make test           # Run test suite
-make check          # Run shellcheck on all scripts
+make check          # Verify clip is in PATH
 ```
 
 ### Using install.sh Script
@@ -225,10 +226,9 @@ man clip                   # View manual page
 
 ### Uninstallation
 
-**Using Makefile**:
+**Using Makefile** (system-wide only):
 ```bash
-sudo make uninstall        # System-wide
-make uninstall-user        # User-level
+sudo make uninstall
 ```
 
 **Manual removal**:
@@ -328,15 +328,15 @@ clip intro.md features.md api.md -f
 | `-H STR` | `--file-header STR` | Custom header (use {} for filename) |
 | `-F STR` | `--file-footer STR` | Custom footer |
 | `-v` | `--verbose` | Verbose output (default) |
-| `-q` | `--quiet` | Quiet mode (suppress non-error output) |
+| `-q` | `--quiet` | Quiet mode (suppress info/success messages) |
 | `-V` | `--version` | Display version |
 | `-h` | `--help` | Display help message |
 
-**Combined short options** are supported:
+**Combined short options** are supported (boolean flags only):
 ```bash
 clip -vp          # Verbose paste
 clip -qc          # Quiet compress
-clip -pcrQ85      # Paste, compress, resize, quality 85
+clip -pc -Q 85    # Paste, compress, quality 85
 ```
 
 ## Examples
@@ -546,7 +546,7 @@ grep "VERSION=" clip
 
 ```
 clip/
-├── clip                    # Main script (408 lines, 14 functions)
+├── clip                    # Main script (404 lines, 15 functions)
 ├── clip.1                  # Man page (groff format)
 ├── clip.bash_completion    # Bash tab completion (92 lines)
 ├── install.sh              # Installation script (324 lines)
@@ -570,8 +570,8 @@ clip/
 ### Key Components
 
 **Main Script** (`clip`):
-- 408 lines of BCS-compliant Bash 5.2+ code
-- 14 functions with comprehensive documentation
+- 404 lines of BCS-compliant Bash 5.2+ code
+- 15 functions with comprehensive documentation
 - Zero ShellCheck warnings
 - Complete error handling with `set -euo pipefail`
 
@@ -583,11 +583,16 @@ clip/
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error (file not found, clipboard operation failed, etc.) |
-| 22 | Invalid argument (bad option, quality out of range, etc.) |
+| Code | Name | Meaning |
+|------|------|---------|
+| 0 | SUCCESS | Successful operation |
+| 1 | ERR_GENERAL | General error (user aborted, clipboard operation failed) |
+| 5 | ERR_IO | I/O error (cannot create file or directory) |
+| 8 | ERR_REQUIRED | Required argument missing (no files given, option needs value) |
+| 9 | ERR_RANGE | Value out of range (quality not 1-100) |
+| 18 | ERR_NODEP | Missing dependency (xclip, pngquant, etc.) |
+| 20 | ERR_ENV | Environment error (no GUI display detected) |
+| 22 | ERR_INVAL | Invalid argument (unknown option) |
 
 ## Troubleshooting
 

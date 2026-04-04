@@ -1,4 +1,4 @@
-.TH CLIP 1 "November 2025" "clip 1.0.1" "User Commands"
+.TH CLIP 1 "April 2026" "clip 1.0.1" "User Commands"
 .SH NAME
 clip \- terminal clipboard utility for Linux systems
 .SH SYNOPSIS
@@ -39,7 +39,7 @@ If no filename is specified in paste mode, output goes to stdout.
 Enable verbose output (default). Shows informational messages during operation.
 .TP
 .BR \-q ", " \-\-quiet
-Disable verbose output. Only errors are displayed. Useful for scripts.
+Disable verbose output. Only warnings and errors are displayed. Useful for scripts.
 .TP
 .BR \-V ", " \-\-version
 Display version information and exit.
@@ -176,13 +176,28 @@ Process clipboard content via pipeline:
 .SH EXIT STATUS
 .TP
 .B 0
-Success
+Success.
 .TP
 .B 1
-General error (file not found, clipboard operation failed, dependency missing, etc.)
+General error (user aborted, clipboard operation failed).
+.TP
+.B 5
+I/O error (cannot create file or directory).
+.TP
+.B 8
+Required argument missing (no files given, option needs a value).
+.TP
+.B 9
+Value out of range (quality not 1\-100).
+.TP
+.B 18
+Missing dependency (xclip, pngquant, imagemagick not available).
+.TP
+.B 20
+Environment error (no GUI display detected; DISPLAY and WAYLAND_DISPLAY unset).
 .TP
 .B 22
-Invalid argument (bad option, quality out of range, invalid parameter value)
+Invalid argument (unknown option).
 
 .SH FILES
 .TP

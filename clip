@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-#shellcheck disable=SC2015,SC2155
-# SC2015: Safe usage of && || pattern for color variable initialization based on terminal detection
+#shellcheck disable=SC2155
 # SC2155: Acceptable for readonly variable declaration with command substitution (SCRIPT_PATH)
 # clip - Utility for clipboard operations in Ubuntu/Linux desktop systems
 #
@@ -28,13 +27,18 @@ declare -- CLIP='' CONVERT='' OPTIPNG='' PNGQUANT=''
 declare -i VERBOSE=1
 
 # Color support for terminal output
-[[ -t 2 ]] && declare -r RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m' || declare -r RED='' GREEN='' YELLOW='' CYAN='' NC=''
+# Only check stderr (-t 2): all messaging targets stderr via _msg();
+# checking stdout would disable colors when only stdout is piped.
+if [[ -t 2 ]]; then
+  declare -r RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m'
+else
+  declare -r RED='' GREEN='' YELLOW='' CYAN='' NC=''
+fi
 
 # Core message function using FUNCNAME for context
 _msg() {
   local -- status="${FUNCNAME[1]}" prefix="$SCRIPT_NAME:" msg
   case "$status" in
-    vecho)   : ;;
     info)    prefix+=" ${CYAN}◉${NC}" ;;
     warn)    prefix+=" ${YELLOW}▲${NC}" ;;
     success) prefix+=" ${GREEN}✓${NC}" ;;
@@ -43,23 +47,33 @@ _msg() {
   esac
   for msg in "$@"; do printf '%s %s\n' "$prefix" "$msg"; done
 }
+
 # Messaging functions
-success() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
-warn() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
 info() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+success() { ((VERBOSE)) || return 0; >&2 _msg "$@"; }
+warn() { >&2 _msg "$@"; }
 error() { >&2 _msg "$@"; }
 die() { (($# < 2)) || error "${@:2}"; exit "${1:-0}"; }
 
 yn() {
   local -- REPLY
-  >&2 read -r -n 1 -p "$(2>&1 warn "${1:-'Continue?'}") y/n "
+  read -r -n 1 -p "$SCRIPT_NAME: ${YELLOW}▲${NC} ${1:-Continue?} y/n "
   >&2 echo
   [[ ${REPLY,,} == y ]]
 }
 
+# Argument validation helper
+noarg() { (($# > 1)) || die 8 "Option ${1@Q} requires an argument"; }
+
+# Utility functions
+# decp() - Display variable declaration without the 'declare' prefix
+# Usage: decp VAR1 [VAR2 ...]
+# Example: decp QUALITY outputs "QUALITY=90" instead of "declare -i QUALITY=90"
+decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
+
 # Display help information
-usage() {
-  cat <<EOT
+show_help() {
+  cat <<HELP
 $SCRIPT_NAME $VERSION - Terminal clipboard utility
 
 Copies contents of files to clipboard;
@@ -126,138 +140,7 @@ Examples:
   # Copy with custom XML headers/footers
   $SCRIPT_NAME README.md CLAUDE.md -f -H '<file name="{}"><![CDATA[\n' -F ']]></file>\n\n'
 
-EOT
-}
-
-
-# Utility functions
-# decp() - Display variable declaration without the 'declare' prefix
-# Usage: decp VAR1 [VAR2 ...]
-# Example: decp QUALITY outputs "QUALITY=90" instead of "declare -i QUALITY=90"
-decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
-
-
-# Main function that handles argument parsing and operation mode selection
-#
-# Arguments:
-#   $@ - Command line arguments
-main() {
-  local -a Files=()
-  local -i pastemode=0
-
-  # Process command-line arguments
-  while (($#)); do case $1 in
-    -h|--help)     usage; return 0 ;;
-    -V|--version)  echo "$SCRIPT_NAME $VERSION"; return 0 ;;
-
-    -f|--use-file-header)
-                   USE_FILE_HEADER=1 ;;
-    -H|--file-header)
-                   shift; FILE_HEADER=${1:-} ;;
-    -F|--file-footer)
-                   shift; FILE_FOOTER=${1:-} ;;
-
-    -p|--paste)    pastemode=1 ;;
-    -c|--compress) COMPRESS=1 ;;
-    -r|--resize)   COMPRESS=1; COMPRESS_MODE=resize ;;
-    -Q|--quality)  shift; QUALITY="${1:-90}"
-                   ((QUALITY >= 1 && QUALITY <= 100)) || die 22 "Quality must be 1-100, got ${QUALITY@Q}" ;;
-
-    -v|--verbose)  VERBOSE+=1 ;;
-    -q|--quiet)    VERBOSE=0 ;;
-
-    -[hVfHFpcrQvq]*) # Handle combined short options (e.g., -vp becomes -v -p)
-                   # Split option string into individual characters, prefix each with dash
-                   # Example: -vVq → '' -v -V -q [remaining args]
-                   #shellcheck disable=SC2046  # Intentional word splitting for option expansion
-                   set -- '' $(printf -- '-%c ' $(grep -o . <<<"${1:1}")) "${@:2}"
-                   ;;
-    --)            shift; Files+=("$@")
-                   break
-                   ;;
-    -*)            die 22 "Invalid option ${1@Q}"
-                   ;;
-    *)             Files+=("$1")
-                   ;;
-  esac; shift; done
-
-  # Check for GUI environment
-  if [[ -z ${DISPLAY:-} ]] && [[ -z ${WAYLAND_DISPLAY:-} ]]; then
-    die 1 'No GUI detected. This script requires a graphical desktop environment.' \
-          'DISPLAY and WAYLAND_DISPLAY variables are not set.'
-  fi
-
-  # Check if xclip is installed, install if missing
-  CLIP=$(command -v xclip || true)
-  if [[ -z $CLIP ]]; then
-    yn 'Install xclip?' || die 1 'xclip is required but not installed'
-    info 'Installing xclip'
-    sudo apt install -y xclip &>/dev/null || die 1 'Failed to install xclip'
-    CLIP=$(command -v xclip)
-  fi
-
-  if ((COMPRESS)); then
-    # Check for PNG optimization tools
-    PNGQUANT=$(command -v pngquant || true)
-    OPTIPNG=$(command -v optipng || true)
-    CONVERT=$(command -v convert || true)
-
-    if [[ $COMPRESS_MODE == optimize ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; then
-      yn 'Install pngquant and optipng?' || die 1 'Operation aborted'
-      info 'Installing PNG optimization tools'
-      sudo apt install -y pngquant optipng &>/dev/null
-      PNGQUANT=$(command -v pngquant || true)
-      OPTIPNG=$(command -v optipng || true)
-    fi
-
-    if [[ -z $CONVERT ]] && { [[ $COMPRESS_MODE == resize ]] || { [[ $COMPRESS_MODE == optimize ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; }; }; then
-      yn 'Install imagemagick?' || die 1 'Operation aborted'
-      info 'Installing ImageMagick for image processing'
-      sudo apt install -y imagemagick &>/dev/null
-      CONVERT=$(command -v convert)
-    fi
-  fi
-
-  # Run in appropriate mode
-  if ((pastemode)); then
-    paste_contents_of_clipboard_to_file "${Files[@]}"
-  else
-    copy_contents_of_files_to_clipboard "${Files[@]}"
-  fi
-}
-
-# Copy content of one or more files to the clipboard
-#
-# Arguments:
-#   $@ - List of files to copy
-#
-# Returns:
-#   0 on success, 1 if no valid files were found
-copy_contents_of_files_to_clipboard() {
-  local -a Files=()
-  local -- file
-
-  # Process each file argument
-  for file in "$@"; do
-    if [[ ! -f "$file" ]]; then
-      error "File ${file@Q} not found"
-      continue
-    fi
-    Files+=("$file")
-  done
-  # Check if we have any valid files
-  ((${#Files[@]})) || die 1 'No files to copy to clipboard'
-  # Copy concatenated file contents to clipboard
-  { local -i ccc=0
-    for file in "${Files[@]}"; do
-      ccc+=1
-      _fileheader "$ccc" "$file"
-      cat -s -- "$file"
-      _filefooter "$ccc" "$file"
-    done
-  } | "$CLIP" -selection clipboard -i
-  # Show success message if verbose mode enabled
-  success "File$( ((${#Files[@]} == 1)) || echo 's') '${Files[*]}' copied to clipboard"
+HELP
 }
 
 # Output file header if USE_FILE_HEADER is enabled
@@ -266,9 +149,6 @@ copy_contents_of_files_to_clipboard() {
 # Arguments:
 #   $1 - File counter (for reference, not used in output)
 #   $2 - Filename to substitute in header template
-#
-# Returns:
-#   0 always (outputs header or nothing)
 _fileheader() {
   ((USE_FILE_HEADER)) || return 0
   echo -en "${FILE_HEADER//\{\}/"$2"}"
@@ -280,12 +160,43 @@ _fileheader() {
 # Arguments:
 #   $1 - File counter (for reference, not used in output)
 #   $2 - Filename to substitute in footer template
-#
-# Returns:
-#   0 always (outputs footer or nothing)
 _filefooter() {
   ((USE_FILE_HEADER)) || return 0
   echo -en "${FILE_FOOTER//\{\}/"$2"}"
+}
+
+# Copy content of one or more files to the clipboard
+#
+# Arguments:
+#   $@ - List of files to copy
+#
+# Returns:
+#   0 on success, 1 if no valid files were found
+copy_contents_of_files_to_clipboard() {
+  local -a files=()
+  local -- file
+
+  # Process each file argument
+  for file in "$@"; do
+    if [[ ! -f $file ]]; then
+      error "File ${file@Q} not found"
+      continue
+    fi
+    files+=("$file")
+  done
+  # Check if we have any valid files
+  ((${#files[@]})) || die 8 'No files to copy to clipboard'
+  # Copy concatenated file contents to clipboard
+  { local -i ccc=0
+    for file in "${files[@]}"; do
+      ccc+=1
+      _fileheader "$ccc" "$file"
+      cat -s -- "$file"
+      _filefooter "$ccc" "$file"
+    done
+  } | "$CLIP" -selection clipboard -i
+  # Show success message if verbose mode enabled
+  success "File$( ((${#files[@]} == 1)) || echo 's') '${files[*]}' copied to clipboard"
 }
 
 # Paste clipboard contents to stdout or a file
@@ -297,59 +208,59 @@ _filefooter() {
 #   0 on success, exits with code 1 if destination directory doesn't exist
 paste_contents_of_clipboard_to_file() {
   # Paste to stdout?
-  (($#)) || { "$CLIP" -selection clipboard -o; return $?; }
+  (($#)) || { "$CLIP" -selection clipboard -o; return; }
 
   # Paste to file
   (($# == 1)) || warn "Can only paste to one file: '${*:2}' ignored"
   local -- output_file=$1
   local -- dir_name temp_file temp_file2
-  local -i file_size1 file_size2
+  local -i file_size1 file_size2 optilevel=0
   dir_name=$(dirname "$output_file")
 
-  if [[ ! -d "$dir_name" ]]; then
+  if [[ ! -d $dir_name ]]; then
     info "Directory ${dir_name@Q} does not exist. Creating ..."
-    mkdir -p "$dir_name" || die 1 "Could not create ${dir_name@Q}"
+    mkdir -p "$dir_name" || die 5 "Could not create ${dir_name@Q}"
   fi
-  if ((VERBOSE)) && [[ -f "$output_file" ]] && [[ -t 1 ]]; then
+  if ((VERBOSE)) && [[ -f $output_file ]] && [[ -t 1 ]]; then
     warn "${output_file@Q} already exists."
     yn 'Overwrite?' || die 1 'Operation aborted'
   fi
-  touch "$output_file" || die 1 "Could not create ${output_file@Q}"
-  
+  touch "$output_file" || die 5 "Could not create ${output_file@Q}"
+
   # Check if clipboard contains image data
   if "$CLIP" -selection clipboard -t TARGETS -o | grep -q 'image/png'; then
     info 'Detected image data in clipboard'
-    
+
     if ((COMPRESS)); then
       # Create temporary files
       temp_file=$(mktemp)
       temp_file2=$(mktemp)
-      trap 'rm -f "$temp_file" "$temp_file2"' EXIT ERR
+      trap 'trap - SIGINT SIGTERM EXIT; rm -f "${temp_file:-}" "${temp_file2:-}"' SIGINT SIGTERM EXIT
 
       # First save the raw PNG
       "$CLIP" -selection clipboard -t image/png -o > "$temp_file"
       file_size1=$(stat -c%s "$temp_file")
       info "Original image size: $file_size1 bytes"
-      
+
       # Compression strategy selection: optimize (lossless/lossy) vs resize (dimension-based)
-      if [[ $COMPRESS_MODE == "optimize" ]]; then
+      if [[ $COMPRESS_MODE == optimize ]]; then
         info 'Using PNG optimization'
 
         # Priority order: pngquant (best compression) → optipng (lossless) → imagemagick (fallback)
         # Try pngquant first for best lossy compression with quality control
-        if [[ -n "$PNGQUANT" ]]; then
+        if [[ -n $PNGQUANT ]]; then
           info "Optimizing with pngquant (quality: $QUALITY)"
           # --skip-if-larger ensures we don't increase file size
-          "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file" || warn "pngquant failed, using fallback"
-        elif [[ -n "$OPTIPNG" ]]; then
+          "$PNGQUANT" --quality=0-"$QUALITY" --skip-if-larger --force --output "$temp_file2" "$temp_file" || warn 'pngquant failed, using fallback'
+        elif [[ -n $OPTIPNG ]]; then
           # Calculate optipng level (0-7) from quality (0-100)
           # Higher quality → lower level (more compression attempts)
           # Formula: level = 7 - (quality / 15), e.g., quality 90 → level 1
-          local -i optilevel=$(( 7 - QUALITY / 15 ))
+          optilevel=$(( 7 - QUALITY / 15 ))
 
           info "Optimizing with optipng (level: $optilevel)"
           "$OPTIPNG" -o"$optilevel" -quiet -out "$temp_file2" "$temp_file" || warn 'optipng failed, using fallback'
-        elif [[ -n "$CONVERT" ]]; then
+        elif [[ -n $CONVERT ]]; then
           # Fallback to ImageMagick with aggressive PNG compression settings
           info 'Optimizing with ImageMagick'
           "$CONVERT" "$temp_file" -strip -define png:compression-filter=5 -define png:compression-level=9 -define png:compression-strategy=1 "$temp_file2" || warn 'ImageMagick optimization failed, using fallback'
@@ -360,7 +271,7 @@ paste_contents_of_clipboard_to_file() {
         fi
       else
         # Resize-based compression: reduces dimensions by percentage (quality parameter)
-        if [[ -n "$CONVERT" ]]; then
+        if [[ -n $CONVERT ]]; then
           # QUALITY parameter becomes resize percentage (e.g., 75 = 75% of original size)
           info "Resizing image with quality: $QUALITY%"
           "$CONVERT" "$temp_file" -resize "$QUALITY%" "$temp_file2" || warn 'ImageMagick resize failed, using fallback'
@@ -369,10 +280,10 @@ paste_contents_of_clipboard_to_file() {
           cp "$temp_file" "$temp_file2"
         fi
       fi
-      
+
       # Verify compression was beneficial before using compressed version
       # Some images may not compress well or compression may fail
-      if [[ -s "$temp_file2" ]]; then
+      if [[ -s $temp_file2 ]]; then
         file_size2=$(stat -c%s "$temp_file2")
         info "Compressed image size: $file_size2 bytes"
 
@@ -398,10 +309,96 @@ paste_contents_of_clipboard_to_file() {
     # Write text to file
     "$CLIP" -selection clipboard -o > "$output_file"
   fi
-  
+
   # Show success message if verbose mode enabled
   success "Clipboard contents pasted to ${output_file@Q}"
 }
 
+# Main function that handles argument parsing and operation mode selection
+#
+# Arguments:
+#   $@ - Command line arguments
+main() {
+  local -a files=()
+  local -i pastemode=0
+
+  # Process command-line arguments
+  while (($#)); do case $1 in
+    -h|--help)     show_help; return 0 ;;
+    -V|--version)  echo "$SCRIPT_NAME $VERSION"; return 0 ;;
+
+    -f|--use-file-header)
+                   USE_FILE_HEADER=1 ;;
+    -H|--file-header)
+                   noarg "$@"; shift; FILE_HEADER=$1 ;;
+    -F|--file-footer)
+                   noarg "$@"; shift; FILE_FOOTER=$1 ;;
+
+    -p|--paste)    pastemode=1 ;;
+    -c|--compress) COMPRESS=1 ;;
+    -r|--resize)   COMPRESS=1; COMPRESS_MODE=resize ;;
+    -Q|--quality)  noarg "$@"; shift; QUALITY=$1
+                   ((QUALITY >= 1 && QUALITY <= 100)) || die 9 "Quality must be 1-100, got ${QUALITY@Q}" ;;
+
+    -v|--verbose)  VERBOSE=1 ;;
+    -q|--quiet)    VERBOSE=0 ;;
+
+    # Split combined short options: -vp → -v -p (boolean flags only)
+    -[hVfpcrvq]?*) set -- "${1:0:2}" "-${1:2}" "${@:2}"; continue ;;
+    --)            shift; files+=("$@")
+                   break
+                   ;;
+    -*)            die 22 "Invalid option ${1@Q}"
+                   ;;
+    *)             files+=("$1")
+                   ;;
+  esac; shift; done
+
+  # Check for GUI environment
+  if [[ -z ${DISPLAY:-} ]] && [[ -z ${WAYLAND_DISPLAY:-} ]]; then
+    die 20 'No GUI detected. This script requires a graphical desktop environment.' \
+           'DISPLAY and WAYLAND_DISPLAY variables are not set.'
+  fi
+
+  # Check if xclip is installed, install if missing
+  CLIP=$(command -v xclip ||:)
+  if [[ -z $CLIP ]]; then
+    yn 'Install xclip?' || die 18 'xclip is required but not installed'
+    info 'Installing xclip'
+    sudo apt install -y xclip &>/dev/null || die 18 'Failed to install xclip'
+    CLIP=$(command -v xclip)
+  fi
+
+  if ((COMPRESS)); then
+    # Check for PNG optimization tools
+    PNGQUANT=$(command -v pngquant ||:)
+    OPTIPNG=$(command -v optipng ||:)
+    CONVERT=$(command -v convert ||:)
+
+    if [[ $COMPRESS_MODE == optimize ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; then
+      yn 'Install pngquant and optipng?' || die 18 'Operation aborted'
+      info 'Installing PNG optimization tools'
+      sudo apt install -y pngquant optipng &>/dev/null
+      PNGQUANT=$(command -v pngquant ||:)
+      OPTIPNG=$(command -v optipng ||:)
+    fi
+
+    if [[ -z $CONVERT ]] && { [[ $COMPRESS_MODE == resize ]] || { [[ $COMPRESS_MODE == optimize ]] && [[ -z $PNGQUANT ]] && [[ -z $OPTIPNG ]]; }; }; then
+      yn 'Install imagemagick?' || die 18 'Operation aborted'
+      info 'Installing ImageMagick for image processing'
+      sudo apt install -y imagemagick &>/dev/null
+      CONVERT=$(command -v convert)
+    fi
+  fi
+
+  # Run in appropriate mode
+  if ((pastemode)); then
+    paste_contents_of_clipboard_to_file "${files[@]}"
+  else
+    copy_contents_of_files_to_clipboard "${files[@]}"
+  fi
+}
+
 main "$@"
+
 #fin
