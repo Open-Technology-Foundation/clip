@@ -1,17 +1,18 @@
-#!/usr/bin/env bash
-#shellcheck disable=SC2155
-# SC2155: Acceptable for readonly variable declaration with command substitution (SCRIPT_PATH)
+#!/usr/bin/bash
 # clip - Utility for clipboard operations in Ubuntu/Linux desktop systems
 #
 # This script allows copying file contents to clipboard and
-# pasting clipboard contents to files or stdout.
+# pasting clipboard contents (text or PNG image) to files or stdout.
 #
 set -euo pipefail
-shopt -s inherit_errexit shift_verbose extglob nullglob
+shopt -s inherit_errexit extglob nullglob
+
+declare -rx PATH=~/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 # Script metadata
 declare -r VERSION=1.0.1
-declare -r SCRIPT_PATH=$(realpath -e -- "$0")
+#shellcheck disable=SC2155
+declare -r SCRIPT_PATH=$(realpath -- "$0")
 declare -r SCRIPT_NAME=${SCRIPT_PATH##*/}
 
 # Global variable declarations
@@ -23,12 +24,16 @@ declare -- FILE_FOOTER='\n```\n\n'
 # Executable paths (will be set later)
 declare -- CLIP='' CONVERT='' OPTIPNG='' PNGQUANT=''
 
+# Temp file paths (global for trap visibility — BCS0603)
+declare -- temp_file='' temp_file2=''
+
 # Logging system
 declare -i VERBOSE=1
 
 # Color support for terminal output
 # Only check stderr (-t 2): all messaging targets stderr via _msg();
 # checking stdout would disable colors when only stdout is piped.
+#bcscheck disable=BCS0706
 if [[ -t 2 ]]; then
   declare -r RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m'
 else
@@ -37,8 +42,8 @@ fi
 
 # Core message function using FUNCNAME for context
 _msg() {
-  local -- status="${FUNCNAME[1]}" prefix="$SCRIPT_NAME:" msg
-  case "$status" in
+  local -- prefix="$SCRIPT_NAME:" msg
+  case ${FUNCNAME[1]} in
     info)    prefix+=" ${CYAN}◉${NC}" ;;
     warn)    prefix+=" ${YELLOW}▲${NC}" ;;
     success) prefix+=" ${GREEN}✓${NC}" ;;
@@ -57,19 +62,20 @@ die() { (($# < 2)) || error "${@:2}"; exit "${1:-0}"; }
 
 yn() {
   local -- REPLY
-  read -r -n 1 -p "$SCRIPT_NAME: ${YELLOW}▲${NC} ${1:-Continue?} y/n "
+  >&2 echo -n "$SCRIPT_NAME: ${YELLOW}▲${NC} ${1:-Continue?} y/n "
+  read -r -n 1
   >&2 echo
   [[ ${REPLY,,} == y ]]
 }
-
-# Argument validation helper
-noarg() { (($# > 1)) || die 8 "Option ${1@Q} requires an argument"; }
 
 # Utility functions
 # decp() - Display variable declaration without the 'declare' prefix
 # Usage: decp VAR1 [VAR2 ...]
 # Example: decp QUALITY outputs "QUALITY=90" instead of "declare -i QUALITY=90"
-decp() { declare -p "$@" | sed 's/^declare -[a-zA-Z-]* //'; }
+decp() { declare -p "$@" 2>/dev/null | sed 's/^declare -[a-zA-Z-]* //'; }
+
+# Argument validation helper
+noarg() { (($# > 1)) || die 8 "Option ${1@Q} requires an argument"; }
 
 # Display help information
 show_help() {
@@ -117,7 +123,7 @@ Options:
 
   General Options:
   -v, --verbose   Enable verbose output (default)
-  -q, --quiet     Disable verbose output
+  -q, --quiet     Disable verbose output; no prompting
 
   -V, --version   Display version [$(decp VERSION)]
   -h, --help      Display this help message
@@ -145,24 +151,16 @@ HELP
 
 # Output file header if USE_FILE_HEADER is enabled
 # Substitutes {} in FILE_HEADER template with filename
-#
-# Arguments:
-#   $1 - File counter (for reference, not used in output)
-#   $2 - Filename to substitute in header template
 _fileheader() {
   ((USE_FILE_HEADER)) || return 0
-  echo -en "${FILE_HEADER//\{\}/"$2"}"
+  printf '%s' "${FILE_HEADER//\{\}/"$1"}"
 }
 
 # Output file footer if USE_FILE_HEADER is enabled
 # Substitutes {} in FILE_FOOTER template with filename
-#
-# Arguments:
-#   $1 - File counter (for reference, not used in output)
-#   $2 - Filename to substitute in footer template
 _filefooter() {
   ((USE_FILE_HEADER)) || return 0
-  echo -en "${FILE_FOOTER//\{\}/"$2"}"
+  printf '%s' "${FILE_FOOTER//\{\}/"$1"}"
 }
 
 # Copy content of one or more files to the clipboard
@@ -171,7 +169,7 @@ _filefooter() {
 #   $@ - List of files to copy
 #
 # Returns:
-#   0 on success, 1 if no valid files were found
+#   0 on success; dies with 8 if no valid files remain after filtering
 copy_contents_of_files_to_clipboard() {
   local -a files=()
   local -- file
@@ -187,16 +185,14 @@ copy_contents_of_files_to_clipboard() {
   # Check if we have any valid files
   ((${#files[@]})) || die 8 'No files to copy to clipboard'
   # Copy concatenated file contents to clipboard
-  { local -i ccc=0
-    for file in "${files[@]}"; do
-      ccc+=1
-      _fileheader "$ccc" "$file"
+  { for file in "${files[@]}"; do
+      _fileheader "$file"
       cat -s -- "$file"
-      _filefooter "$ccc" "$file"
+      _filefooter "$file"
     done
   } | "$CLIP" -selection clipboard -i
   # Show success message if verbose mode enabled
-  success "File$( ((${#files[@]} == 1)) || echo 's') '${files[*]}' copied to clipboard"
+  success "File$( ((${#files[@]} == 1)) || echo 's') ${files[*]@Q} copied to clipboard"
 }
 
 # Paste clipboard contents to stdout or a file
@@ -205,17 +201,17 @@ copy_contents_of_files_to_clipboard() {
 #   $1 - (Optional) Output file path. If not provided, outputs to stdout
 #
 # Returns:
-#   0 on success, exits with code 1 if destination directory doesn't exist
+#   0 on success; dies with 22 (bad arg), 5 (I/O), or 1 (user abort)
 paste_contents_of_clipboard_to_file() {
   # Paste to stdout?
   (($#)) || { "$CLIP" -selection clipboard -o; return; }
 
   # Paste to file
-  (($# == 1)) || warn "Can only paste to one file: '${*:2}' ignored"
+  (($# == 1)) || die 22 "Can only paste to one file '${*:2}'"
   local -- output_file=$1
-  local -- dir_name temp_file temp_file2
+  local -- dir_name
   local -i file_size1 file_size2 optilevel=0
-  dir_name=$(dirname "$output_file")
+  dir_name=${output_file%/*}
 
   if [[ ! -d $dir_name ]]; then
     info "Directory ${dir_name@Q} does not exist. Creating ..."
@@ -232,10 +228,10 @@ paste_contents_of_clipboard_to_file() {
     info 'Detected image data in clipboard'
 
     if ((COMPRESS)); then
-      # Create temporary files
-      temp_file=$(mktemp)
-      temp_file2=$(mktemp)
+      # Set trap before resource creation (BCS0110) — mktemp with error handling (BCS1006)
       trap 'trap - SIGINT SIGTERM EXIT; rm -f "${temp_file:-}" "${temp_file2:-}"' SIGINT SIGTERM EXIT
+      temp_file=$(mktemp) || die 5 'Failed to create temp file'
+      temp_file2=$(mktemp) || die 5 'Failed to create temp file'
 
       # First save the raw PNG
       "$CLIP" -selection clipboard -t image/png -o > "$temp_file"
@@ -324,8 +320,8 @@ main() {
 
   # Process command-line arguments
   while (($#)); do case $1 in
-    -h|--help)     show_help; return 0 ;;
-    -V|--version)  echo "$SCRIPT_NAME $VERSION"; return 0 ;;
+    -h|--help)     show_help; exit 0 ;;
+    -V|--version)  echo "$SCRIPT_NAME $VERSION"; exit 0 ;;
 
     -f|--use-file-header)
                    USE_FILE_HEADER=1 ;;
@@ -338,36 +334,28 @@ main() {
     -c|--compress) COMPRESS=1 ;;
     -r|--resize)   COMPRESS=1; COMPRESS_MODE=resize ;;
     -Q|--quality)  noarg "$@"; shift; QUALITY=$1
-                   ((QUALITY >= 1 && QUALITY <= 100)) || die 9 "Quality must be 1-100, got ${QUALITY@Q}" ;;
+                   ((QUALITY >= 1 && QUALITY <= 100)) || die 22 "Quality must be 1-100, got ${QUALITY@Q}" ;;
 
     -v|--verbose)  VERBOSE=1 ;;
     -q|--quiet)    VERBOSE=0 ;;
 
-    # Split combined short options: -vp → -v -p (boolean flags only)
-    -[hVfpcrvq]?*) set -- "${1:0:2}" "-${1:2}" "${@:2}"; continue ;;
-    --)            shift; files+=("$@")
-                   break
-                   ;;
-    -*)            die 22 "Invalid option ${1@Q}"
-                   ;;
-    *)             files+=("$1")
-                   ;;
+    --)            shift; files+=("$@"); break ;;
+    # Split combined short options: -vp → -v -p, -pH → -p -H
+    -[hVfHFpcrQvq]?*) set -- "${1:0:2}" "-${1:2}" "${@:2}"; continue ;;
+    -*)            die 22 "Invalid option ${1@Q}" ;;
+    *)             files+=("$1") ;;
   esac; shift; done
+
+  readonly VERBOSE COMPRESS QUALITY COMPRESS_MODE USE_FILE_HEADER FILE_HEADER FILE_FOOTER
 
   # Check for GUI environment
   if [[ -z ${DISPLAY:-} ]] && [[ -z ${WAYLAND_DISPLAY:-} ]]; then
-    die 20 'No GUI detected. This script requires a graphical desktop environment.' \
+    die 19 'No GUI detected. This script requires a graphical desktop environment.' \
            'DISPLAY and WAYLAND_DISPLAY variables are not set.'
   fi
 
-  # Check if xclip is installed, install if missing
-  CLIP=$(command -v xclip ||:)
-  if [[ -z $CLIP ]]; then
-    yn 'Install xclip?' || die 18 'xclip is required but not installed'
-    info 'Installing xclip'
-    sudo apt install -y xclip &>/dev/null || die 18 'Failed to install xclip'
-    CLIP=$(command -v xclip)
-  fi
+  # Check if xclip is installed
+  CLIP=$(command -v xclip) || die 18 'xclip is required but not installed. Please run: sudo apt install xclip'
 
   if ((COMPRESS)); then
     # Check for PNG optimization tools
@@ -391,6 +379,8 @@ main() {
     fi
   fi
 
+  readonly CLIP PNGQUANT OPTIPNG CONVERT
+
   # Run in appropriate mode
   if ((pastemode)); then
     paste_contents_of_clipboard_to_file "${files[@]}"
@@ -400,5 +390,4 @@ main() {
 }
 
 main "$@"
-
 #fin

@@ -59,10 +59,10 @@ For detailed installation options and manual installation, see [Installation](#i
   - **Optimize mode**: pngquant (best) → optipng → imagemagick (fallback)
   - **Resize mode**: Dimension-based compression via ImageMagick
 - ✓ **Intelligent Size Checking**: Only uses compressed version if actually smaller
-- ✓ **Auto-Installation**: Prompts for missing dependencies with user confirmation
+- ✓ **Auto-Installation**: Prompts for missing compression tools with user confirmation
 - ✓ **Flexible Output**: Paste to stdout or files with automatic directory creation
 - ✓ **Custom Formatting**: Add headers/footers when copying files (markdown, XML, etc.)
-- ✓ **Bash 5.2+ Modern Patterns**: `[[`, `(())`, proper arrays, nameref support
+- ✓ **Bash 5.2+ Modern Patterns**: `[[`, `(())`, proper arrays, `${var@Q}` quoting
 - ✓ **Professional Error Handling**: `set -euo pipefail`, comprehensive input validation
 - ✓ **Safe Reinstallation**: Automatically replaces existing installations without prompts
 - ✓ **Verbose/Quiet Modes**: Control output verbosity for scripting or debugging
@@ -105,7 +105,7 @@ This project maintains professional-grade code standards:
 ### Dependencies
 
 **Required**:
-- `xclip` - Core clipboard operations (auto-installed if missing)
+- `xclip` - Core clipboard operations
 
 **Optional** (for PNG compression):
 - `pngquant` - Best lossy compression with quality control
@@ -332,7 +332,7 @@ clip intro.md features.md api.md -f
 | `-V` | `--version` | Display version |
 | `-h` | `--help` | Display help message |
 
-**Combined short options** are supported (boolean flags only):
+**Combined short options** are supported:
 ```bash
 clip -vp          # Verbose paste
 clip -qc          # Quiet compress
@@ -546,14 +546,13 @@ grep "VERSION=" clip
 
 ```
 clip/
-├── clip                    # Main script (404 lines, 15 functions)
+├── clip                    # Main script (393 lines, 15 functions)
 ├── clip.1                  # Man page (groff format)
 ├── clip.bash_completion    # Bash tab completion (92 lines)
-├── install.sh              # Installation script (324 lines)
+├── install.sh              # Installation script (334 lines)
 ├── Makefile                # Installation targets
 ├── README.md               # This documentation
 ├── LICENSE                 # GPL-3.0 license
-├── .gitignore              # Git ignore patterns
 └── tests/                  # Test suite (97.4% pass rate)
     ├── fixtures/           # Test data (PNG, JPEG samples)
     ├── test_lib.sh         # Test framework (260 lines)
@@ -570,13 +569,13 @@ clip/
 ### Key Components
 
 **Main Script** (`clip`):
-- 404 lines of BCS-compliant Bash 5.2+ code
+- 393 lines of BCS-compliant Bash 5.2+ code
 - 15 functions with comprehensive documentation
 - Zero ShellCheck warnings
 - Complete error handling with `set -euo pipefail`
 
 **Test Framework** (`test_lib.sh`):
-- 8 assertion functions
+- 6 assertion functions
 - Color-coded output
 - Automatic setup/cleanup
 - Dependency checking
@@ -589,10 +588,9 @@ clip/
 | 1 | ERR_GENERAL | General error (user aborted, clipboard operation failed) |
 | 5 | ERR_IO | I/O error (cannot create file or directory) |
 | 8 | ERR_REQUIRED | Required argument missing (no files given, option needs value) |
-| 9 | ERR_RANGE | Value out of range (quality not 1-100) |
 | 18 | ERR_NODEP | Missing dependency (xclip, pngquant, etc.) |
-| 20 | ERR_ENV | Environment error (no GUI display detected) |
-| 22 | ERR_INVAL | Invalid argument (unknown option) |
+| 19 | ERR_ENV | Environment error (no GUI display detected) |
+| 22 | ERR_INVAL | Invalid argument (unknown option, value out of range) |
 
 ## Troubleshooting
 
@@ -611,13 +609,13 @@ ssh -X user@host
 
 ### ◉ xclip Not Installed
 
-Script will prompt for installation automatically:
+The script requires xclip and will exit with an error if not found:
 ```bash
 clip myfile.txt
-# Prompts: "Install xclip? y/n"
+# ✗ xclip is required but not installed. Please run: sudo apt install xclip
 ```
 
-Manual installation:
+Install manually:
 ```bash
 sudo apt update && sudo apt install xclip
 ```
@@ -719,9 +717,9 @@ Typical performance:
 This project follows strict Bash 5.2+ coding standards:
 
 **BCS Compliance** (100%):
-- Shebang: `#!/usr/bin/env bash`
+- Shebang: `#!/usr/bin/bash`
 - Error handling: `set -euo pipefail`
-- Required shopt: `inherit_errexit shift_verbose extglob nullglob`
+- Required shopt: `inherit_errexit extglob nullglob`
 - 2-space indentation (no tabs)
 - `declare` with proper types (`-i` for integers, `-r` for readonly)
 - Conditionals: `[[` (not `[` or `test`)

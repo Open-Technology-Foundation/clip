@@ -12,6 +12,10 @@ DESTDIR ?=
 all: help
 
 install:
+	@if [ -z "$(DESTDIR)" ] && ! command -v xclip >/dev/null 2>&1; then \
+	  echo 'Installing required dependency: xclip'; \
+	  apt-get install -y xclip; \
+	fi
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 clip $(DESTDIR)$(BINDIR)/clip
 	install -d $(DESTDIR)$(MANDIR)
@@ -27,6 +31,9 @@ uninstall:
 	rm -f $(DESTDIR)$(COMPDIR)/clip
 
 check:
+	@command -v xclip >/dev/null 2>&1 \
+	  && echo 'xclip: OK' \
+	  || echo 'xclip: NOT FOUND (sudo apt install xclip)'
 	@command -v clip >/dev/null 2>&1 \
 	  && echo 'clip: OK' \
 	  || echo 'clip: NOT FOUND (check PATH)'

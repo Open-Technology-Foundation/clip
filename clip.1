@@ -187,17 +187,14 @@ I/O error (cannot create file or directory).
 .B 8
 Required argument missing (no files given, option needs a value).
 .TP
-.B 9
-Value out of range (quality not 1\-100).
-.TP
 .B 18
 Missing dependency (xclip, pngquant, imagemagick not available).
 .TP
-.B 20
+.B 19
 Environment error (no GUI display detected; DISPLAY and WAYLAND_DISPLAY unset).
 .TP
 .B 22
-Invalid argument (unknown option).
+Invalid argument (unknown option, value out of range).
 
 .SH FILES
 .TP
@@ -230,7 +227,7 @@ At least one of \fBDISPLAY\fR or \fBWAYLAND_DISPLAY\fR must be set for clipboard
 .TP
 .B xclip
 X11 clipboard interface. Required for all clipboard operations.
-Automatically offered for installation if missing.
+Script exits with an error if not installed.
 
 .SS Optional (for PNG compression)
 .TP
