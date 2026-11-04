@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Image copy/paste tests for clip utility
 #
-set -euo pipefail
+# Sourced by run_tests.sh: no errexit here, assertions return 1 by design
 
 run_test_group "Image Copy/Paste Tests"
 

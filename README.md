@@ -78,7 +78,7 @@ This project maintains professional-grade code standards:
   - Safe file operations with validation
   - Proper input sanitization
   - Protected variable expansions
-- ✓ **Test Coverage**: 97.4% pass rate (76/78 tests)
+- ✓ **Test Coverage**: 82 tests, 78 passed, 0 failed, 4 skipped
 - ✓ **Modern Bash**: Bash 5.2+ patterns throughout
   - `[[` for conditionals (not `[` or `test`)
   - `(())` for arithmetic (not `expr`)
@@ -485,7 +485,7 @@ The project includes a comprehensive test suite with 9 test scripts covering all
 
 ### Test Results
 
-Current test status: **97.4% pass rate** (76/78 tests passed, 2 skipped)
+Current test status: **82 tests, 78 passed, 0 failed, 4 skipped** (`make test`)
 
 Test output uses standardized icons:
 - ✓ **Pass**: Test succeeded

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Main test runner for clip utility
 #
-set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
+set -uo pipefail  # no -e: assertion failures must not abort the suite
 
 # Script metadata
 VERSION='1.0.0'
@@ -11,6 +12,7 @@ PRGDIR=${PRG0%/*}
 readonly -- VERSION PRG0 PRG PRGDIR
 
 # Load test library
+# shellcheck source=test_lib.sh
 source "${PRGDIR}/test_lib.sh"
 
 # Test flags
@@ -73,6 +75,7 @@ echo "==========================================================================
 # Run basic functionality tests
 if ((RUN_BASIC)); then
   if [[ -f "${PRGDIR}/test_basic.sh" ]]; then
+    # shellcheck source=test_basic.sh
     source "${PRGDIR}/test_basic.sh"
   else
     skip_test "Basic functionality tests" "test_basic.sh not found"
@@ -82,6 +85,7 @@ fi
 # Run text copy/paste tests
 if ((RUN_TEXT)); then
   if [[ -f "${PRGDIR}/test_text.sh" ]]; then
+    # shellcheck source=test_text.sh
     source "${PRGDIR}/test_text.sh"
   else
     skip_test "Text copy/paste tests" "test_text.sh not found"
@@ -91,6 +95,7 @@ fi
 # Run image tests
 if ((RUN_IMAGE)); then
   if [[ -f "${PRGDIR}/test_images.sh" ]]; then
+    # shellcheck source=test_images.sh
     source "${PRGDIR}/test_images.sh"
   else
     skip_test "Image tests" "test_images.sh not found"
@@ -100,6 +105,7 @@ fi
 # Run compression tests
 if ((RUN_COMPRESS)); then
   if [[ -f "${PRGDIR}/test_compression.sh" ]]; then
+    # shellcheck source=test_compression.sh
     source "${PRGDIR}/test_compression.sh"
   else
     skip_test "Compression tests" "test_compression.sh not found"
@@ -109,6 +115,7 @@ fi
 # Run error handling tests
 if ((RUN_ERROR)); then
   if [[ -f "${PRGDIR}/test_errors.sh" ]]; then
+    # shellcheck source=test_errors.sh
     source "${PRGDIR}/test_errors.sh"
   else
     skip_test "Error handling tests" "test_errors.sh not found"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Error handling tests for clip utility
 #
-set -euo pipefail
+# Sourced by run_tests.sh: no errexit here, assertions return 1 by design
 
 run_test_group "Error Handling Tests"
 
@@ -17,15 +17,15 @@ assert_output "Bad short option produces error" "Invalid option" "$output"
 
 # Test: Missing argument for option requiring value
 output=$("$CLIP_CMD" -Q 2>&1 || true)
-assert_output "Missing quality value produces error" "Invalid option" "$output"
+assert_output "Missing quality value produces error" "requires an argument" "$output"
 
 # Test: Invalid quality value
 output=$("$CLIP_CMD" -Q abc 2>&1 || true)
-if [[ "$output" == *"Invalid"* ]] || [[ "$output" == *"integer expression expected"* ]]; then
-  pass "Invalid quality value produces error"
-else
-  fail "Invalid quality value should produce error"
-fi
+assert_output "Non-numeric quality value produces error" "Quality must be 1-100" "$output"
+assert_output "Non-numeric quality error echoes the input" "'abc'" "$output"
+assert_failure "Non-numeric quality value exits non-zero" "$CLIP_CMD" -Q abc
+output=$("$CLIP_CMD" -Q 1+1 2>&1 || true)
+assert_output "Arithmetic expression as quality is rejected" "Quality must be 1-100" "$output"
 
 # Test: Non-existent file
 if check_xclip; then
@@ -73,8 +73,6 @@ fi
 
 # Test: Paste with invalid path characters (if applicable)
 if check_xclip; then
-  invalid_path="/tmp/test\0file.txt"  # Null character in path
-  # This might not work as expected due to shell handling
   output=$("$CLIP_CMD" -p "/tmp/test*?.txt" 2>&1 || true)
   # Glob characters should be treated literally
   pass "Invalid path characters handled"
@@ -82,15 +80,15 @@ else
   skip_test "Invalid path test" "xclip not available"
 fi
 
-# Test: Multiple paste destinations (only first should be used)
+# Test: Multiple paste destinations are rejected (exit 22, nothing written)
 if check_xclip; then
   test_file=$(create_test_file "multi_paste_src.txt" "Test content")
   "$CLIP_CMD" "$test_file" 2>/dev/null || true
 
   output=$("$CLIP_CMD" -p "$OUTPUT_DIR/dest1.txt" "$OUTPUT_DIR/dest2.txt" 2>&1 || true)
-  assert_output "Multiple paste destinations warning" "ignored" "$output"
-  assert_file_exists "First destination used" "$OUTPUT_DIR/dest1.txt"
-  [[ ! -f "$OUTPUT_DIR/dest2.txt" ]] || fail "Second destination should not be created"
+  assert_output "Multiple paste destinations rejected" "Can only paste to one file" "$output"
+  assert_failure "First destination not created" test -f "$OUTPUT_DIR/dest1.txt"
+  assert_failure "Second destination not created" test -f "$OUTPUT_DIR/dest2.txt"
 else
   skip_test "Multiple paste destinations test" "xclip not available"
 fi

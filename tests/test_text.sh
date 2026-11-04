@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Text copy/paste tests for clip utility
 #
-set -euo pipefail
+# Sourced by run_tests.sh: no errexit here, assertions return 1 by design
 
 run_test_group "Text Copy/Paste Tests"
 
@@ -39,6 +39,18 @@ output_file="$OUTPUT_DIR/pasted.txt"
 if assert_success "Paste clipboard to file" "$CLIP_CMD" -p "$output_file"; then
   assert_file_exists "Pasted file exists" "$output_file"
   assert_file_contains "Pasted file has correct content" "$output_file" "Content to paste"
+fi
+
+# Test: Paste to a bare filename (no slash) must create a file, not a directory
+# Regression: ${output_file%/*} on a bare name returned the name itself,
+# so clip ran mkdir on the target before writing to it.
+test_file=$(create_test_file "bare_source.txt" "Bare filename paste")
+"$CLIP_CMD" "$test_file" 2>/dev/null
+sleep 0.2  # Allow clipboard to settle
+paste_bare_filename() { ( cd "$OUTPUT_DIR" && "$CLIP_CMD" -p bare_pasted.txt ); }
+if assert_success "Paste to bare filename" paste_bare_filename; then
+  assert_file_exists "Bare filename paste is a regular file" "$OUTPUT_DIR/bare_pasted.txt"
+  assert_file_contains "Bare filename paste has correct content" "$OUTPUT_DIR/bare_pasted.txt" "Bare filename paste"
 fi
 
 # Test: Copy with file headers

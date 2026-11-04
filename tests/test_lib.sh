@@ -3,10 +3,8 @@
 #
 # Provides common test functions and utilities
 #
-set -euo pipefail
+set -uo pipefail  # no -e: assertion failures must not abort the suite
 
-# Test configuration
-TEST_VERSION='1.0.0'
 # Get the directory of this test_lib.sh file
 TEST_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -15,13 +13,18 @@ declare -- CLIP_CMD="${TEST_LIB_DIR}/../clip"
 declare -- FIXTURES_DIR="${TEST_LIB_DIR}/fixtures"
 declare -- OUTPUT_DIR="${TEST_LIB_DIR}/output"
 declare -- TMP_DIR="${TEST_LIB_DIR}/tmp"
+# shellcheck disable=SC2034  # consumed by the test files run_tests.sh sources
 readonly -- CLIP_CMD FIXTURES_DIR OUTPUT_DIR TMP_DIR
 
 # Test counters
 declare -i TESTS_RUN=0 TESTS_PASSED=0 TESTS_FAILED=0 TESTS_SKIPPED=0
 
 # Color support
-[[ -t 2 ]] && declare -- RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m' || declare -- RED='' GREEN='' YELLOW='' CYAN='' NC=''
+if [[ -t 2 ]]; then
+  declare -- RED=$'\033[0;31m' GREEN=$'\033[0;32m' YELLOW=$'\033[0;33m' CYAN=$'\033[0;36m' NC=$'\033[0m'
+else
+  declare -- RED='' GREEN='' YELLOW='' CYAN='' NC=''
+fi
 readonly -- RED GREEN YELLOW CYAN NC
 
 # Test framework functions
@@ -45,7 +48,7 @@ _msg() {
 pass() { _msg "$@"; }
 fail() { _msg "$@"; }
 skip() { _msg "$@"; }
-info() { _msg "$@"; }
+info() { ((${VERBOSE:-1})) || return 0; _msg "$@"; }  # VERBOSE set by run_tests.sh -v/-q
 error() { _msg "$@"; }
 
 # Test assertion functions

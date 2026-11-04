@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compression-specific tests for clip utility
 #
-set -euo pipefail
+# Sourced by run_tests.sh: no errexit here, assertions return 1 by design
 
 run_test_group "Image Compression Tests"
 
@@ -64,7 +64,7 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
     # Test: Resize mode with ImageMagick
     if command -v convert &>/dev/null; then
       # Test various resize percentages
-      for percent in 10 25 50 75 90 100 110; do
+      for percent in 10 25 50 75 90 100; do
         sleep 0.2  # Allow previous operation to complete
         output=$("$CLIP_CMD" -p -r -Q "$percent" "$OUTPUT_DIR/resize_${percent}.png" 2>&1 || true)
         assert_file_exists "Resize ${percent}% works" "$OUTPUT_DIR/resize_${percent}.png"
@@ -79,13 +79,10 @@ if [[ -f "$png_file" ]] && command -v xclip &>/dev/null && [[ -n "${DISPLAY:-}" 
         ((size_25 < size_100)) && pass "Resize percentage affects file size"
       fi
 
-      # Test: Upscaling (>100%)
-      if [[ -f "$OUTPUT_DIR/resize_110.png" ]] && [[ -f "$OUTPUT_DIR/resize_100.png" ]]; then
-        size_110=$(stat -c%s "$OUTPUT_DIR/resize_110.png")
-        size_100=$(stat -c%s "$OUTPUT_DIR/resize_100.png")
-        info "110% resize: $size_110 bytes"
-        ((size_110 > size_100)) && pass "Upscaling increases file size"
-      fi
+      # Test: Upscaling (>100%) is rejected — quality/percentage is validated to 1-100
+      output=$("$CLIP_CMD" -p -r -Q 110 "$OUTPUT_DIR/resize_110.png" 2>&1 || true)
+      assert_output "Resize above 100% is rejected" "Quality must be 1-100" "$output"
+      assert_failure "Resize above 100% creates no file" test -f "$OUTPUT_DIR/resize_110.png"
     else
       skip_test "ImageMagick resize tests" "convert not installed"
     fi

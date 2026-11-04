@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Basic functionality tests for clip utility
 #
-set -euo pipefail
+# Sourced by run_tests.sh: no errexit here, assertions return 1 by design
 
 run_test_group "Basic Functionality Tests"
 
@@ -10,20 +10,21 @@ output=$("$CLIP_CMD" -h 2>&1 || true)
 assert_output "Help option (-h) displays usage" "Terminal clipboard utility" "$output"
 assert_output "Help contains usage examples" "Examples:" "$output"
 
-# Test: Version option
+# Test: Version option (expected value read from the script, not hardcoded)
+clip_version=$(sed -n 's/^declare -r VERSION=//p' "$CLIP_CMD")
 output=$("$CLIP_CMD" -V 2>&1 || true)
-assert_output "Version option (-V) displays version" "clip 1.0.0" "$output"
+assert_output "Version option (-V) displays version" "clip $clip_version" "$output"
 
 # Test: Invalid option handling
 assert_failure "Invalid option returns error" "$CLIP_CMD" --invalid-option
 
 # Test: Quiet mode
 output=$("$CLIP_CMD" -q -V 2>&1 || true)
-assert_equal "Quiet mode suppresses verbose output" "clip 1.0.0" "$output"
+assert_equal "Quiet mode suppresses verbose output" "clip $clip_version" "$output"
 
 # Test: Combined short options
 output=$("$CLIP_CMD" -vV 2>&1 || true)
-assert_output "Combined short options work (-vV)" "clip 1.0.0" "$output"
+assert_output "Combined short options work (-vV)" "clip $clip_version" "$output"
 
 # Test: File not found error
 if check_xclip; then

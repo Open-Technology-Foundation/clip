@@ -163,7 +163,7 @@ To add new tests:
 Example test structure:
 ```bash
 #!/usr/bin/env bash
-set -euo pipefail
+# Sourced by run_tests.sh: no errexit here, assertions return 1 by design
 
 run_test_group "My Test Group"
 
