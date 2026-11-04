@@ -151,11 +151,18 @@ This installs:
 
 **Other Makefile targets**:
 ```bash
-make help           # Show all available targets
-make uninstall      # Remove system-wide installation
+make help           # Show all targets and variables
+make uninstall      # Remove installed files
 make test           # Run test suite
-make check          # Verify clip is in PATH
+make check          # Verify clip and xclip are callable
 ```
+
+Installation paths are variables. For a per-user install without sudo:
+```bash
+make PREFIX=$HOME/.local COMPDIR=$HOME/.local/share/bash-completion/completions install
+```
+`DESTDIR` stages an install for packaging (`make DESTDIR=/tmp/pkg install`).
+The Makefile does not install packages; install xclip first with `sudo apt install xclip`.
 
 ### Using install.sh Script
 
